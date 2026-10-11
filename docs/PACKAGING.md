@@ -9,6 +9,8 @@ Local Arch packaging recipes. There is no published binary package yet.
 
 The private FreeRDP package is temporary. The app currently accepts exactly FreeRDP 3.32.1 with SSO MIB off. The fix was merged upstream as [FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653) but is not yet in a FreeRDP release. Once Arch ships a fixed FreeRDP, that version check and the package dependency will move to stock `freerdp`.
 
+**Omarchy package.** Submitting to Omarchy's package repository waits for stock FreeRDP. Two upstream fixes are merged but not yet released: the wildcard-certificate fix ([FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653)) and [FreeRDP#13665](https://github.com/FreeRDP/FreeRDP/pull/13665), which fixes a regression on FreeRDP's development branch that could block WebAuthn channels. Once a release with both reaches Arch's `freerdp` package (expected 3.32.2), the app drops `omawin365-freerdp` and ships as a single package.
+
 ## Building
 
 ```sh
