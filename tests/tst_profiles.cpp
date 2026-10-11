@@ -520,7 +520,7 @@ private slots:
     {
         QTest::addColumn<QByteArray>("bytes");
         QTest::newRow("json-wrapper") << QByteArray("{\"url\":\"rdp://example.test\"}");
-        QTest::newRow("missing-arm") << QByteArray("full address:s:example.test\ngatewayhostname:s:gateway.example.test\n");
+        QTest::newRow("missing-arm") << QByteArray("full address:s:fixture.wvd.microsoft.com\ngatewayhostname:s:fixture-gateway.wvd.microsoft.com\n");
         QTest::newRow("bad-number") << (validProfile + "screen mode id:i:two\n");
         QTest::newRow("embedded-cli-option") << (validProfile + "/cert:ignore\n");
         QTest::newRow("embedded-nul") << (validProfile + QByteArray("username:s:a\0b", 14));
@@ -564,13 +564,18 @@ private slots:
         armCase.replace("/resourcegroups/", "/RESOURCEGROUPS/");
         armCase.replace("/providers/Microsoft.DesktopVirtualization/hostpools/", "/PROVIDERS/MICROSOFT.DESKTOPVIRTUALIZATION/HOSTPOOLS/");
         QTest::newRow("arm-fixed-case") << armCase;
-        QTest::newRow("gateway-443") << setting(supportedProfile, "gatewayhostname", "Gateway.Example.test:443");
-        QTest::newRow("dns-one-byte") << setting(supportedProfile, "full address", "a");
-        QTest::newRow("dns-label-63") << setting(supportedProfile, "full address", QByteArray(63, 'a'));
-        const QByteArray maxDns = QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(61, 'd');
+        QTest::newRow("gateway-443") << setting(supportedProfile, "gatewayhostname", "Fixture-Gateway.WVD.Microsoft.COM:443");
+        // Microsoft's public service hosts as seen in real exports; no tenant data.
+        QTest::newRow("observed-microsoft-hosts") << setting(setting(supportedProfile, "full address", "rdgateway-r1.wvd.microsoft.com"),
+            "gatewayhostname", "afdfp-rdgateway-r1.wvd.microsoft.com:443");
+        for (const auto& key : {QByteArray("full address"), QByteArray("gatewayhostname")})
+            QTest::newRow(("host-us-gov-" + key).constData()) << setting(supportedProfile, key, "fixture.wvd.azure.us");
+        QTest::newRow("dns-one-byte-label") << setting(supportedProfile, "full address", "a.wvd.microsoft.com");
+        QTest::newRow("dns-label-63") << setting(supportedProfile, "full address", QByteArray(63, 'a') + ".wvd.microsoft.com");
+        const QByteArray maxDns = QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(43, 'd') + ".wvd.microsoft.com";
         QTest::newRow("dns-total-253") << setting(supportedProfile, "full address", maxDns);
-        QTest::newRow("dns-numeric-inner-labels") << setting(setting(supportedProfile, "full address", "123.0x7f.example.test"),
-            "gatewayhostname", "10.0x10.example.test:443");
+        QTest::newRow("dns-numeric-inner-labels") << setting(setting(supportedProfile, "full address", "123.0x7f.wvd.microsoft.com"),
+            "gatewayhostname", "10.0x10.wvd.microsoft.com:443");
         QByteArray names = supportedProfile;
         names.replace("fixture_group", QByteArray(90, 'g'));
         names.replace("fixture-pool", QByteArray(64, 'h'));
@@ -614,9 +619,9 @@ private slots:
             omitted.remove(omitted.indexOf(key + ':'), line.size() + 2);
             row("eu-optional-omitted-" + key, omitted);
         }
-        QByteArray alternateFirst = "alternate full address:s:CLOUDPC.EXAMPLE.TEST\r\n" + supportedProfile;
+        QByteArray alternateFirst = "alternate full address:s:FIXTURE-CLOUDPC.WVD.MICROSOFT.COM\r\n" + supportedProfile;
         row("alternate-before-full-address", alternateFirst);
-        for (const auto& hostname : {QByteArray(63, 'a'), QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(61, 'd')}) {
+        for (const auto& hostname : {QByteArray("a.wvd.microsoft.com"), QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(43, 'd') + ".wvd.microsoft.com"}) {
             const auto bytes = setting(setting(fullerProfile, "full address", hostname), "alternate full address", hostname.toUpper());
             row("alternate-equal-dns-boundary-" + QByteArray::number(hostname.size()), bytes);
         }
@@ -720,7 +725,7 @@ private slots:
         utf16Max += QByteArray::fromHex("0a00").repeated((RdpProfile::maximumBytes - utf16Max.size()) / 2);
         QTest::newRow("raw-max-utf16") << utf16Max;
         row("no-terminal-separator", paired.chopped(2));
-        row("changed-valid-address", setting(paired, "full address", "changed.example.test"));
+        row("changed-valid-address", setting(paired, "full address", "changed.wvd.microsoft.com"));
         row("changed-opaque-payload", supportedProfile + signaturePair("Full Address", syntheticSignature("unrelated changed private bytes")));
         // Exact old rejection vectors whose ONLY removed constraint was shape,
         // cap, canonical text or scope vocabulary/presence are now admissions.
@@ -1166,15 +1171,23 @@ private slots:
         for (const auto& value : {"0", "2", "01", "+1", "-1", "0x1", "1.0", "1x", " 1", "1 ", "2147483648", "9999999999999999999999999"})
             row(QByteArray("integer-") + value, supportedProfile + "redirectwebauthn:i:" + value + "\n");
         for (const auto& key : {QByteArray("full address"), QByteArray("gatewayhostname")}) {
-            for (const auto& value : {".example.test", "example.test.", "a..test", "-a.test", "a-.test", "https://example.test", "user@example.test", "example.test/path", "example.test?token=fixture-secret-marker", "example.test#fixture-secret-marker", "127.0.0.1", "[::1]", "example.test:444", "example.test:0443", "example.test:443:443", "example.test:443/path", "a_b.test",
+            for (const auto& value : {".wvd.microsoft.com", "fixture.wvd.microsoft.com.", "a..wvd.microsoft.com", "-a.wvd.microsoft.com", "a-.wvd.microsoft.com", "https://fixture.wvd.microsoft.com", "user@fixture.wvd.microsoft.com", "fixture.wvd.microsoft.com/path", "fixture.wvd.microsoft.com?token=fixture-secret-marker", "fixture.wvd.microsoft.com#fixture-secret-marker", "127.0.0.1", "[::1]", "fixture.wvd.microsoft.com:444", "fixture.wvd.microsoft.com:0443", "fixture.wvd.microsoft.com:443:443", "fixture.wvd.microsoft.com:443/path", "a_b.wvd.microsoft.com",
                      // libc numeric-host forms: getaddrinfo resolves these as IPv4 literals, not DNS names.
                      "2130706433", "0x7f000001", "127.1", "0x7f.0.0.1", "1.2.3", "0X7F.1"})
                 row(key + '-' + value, setting(supportedProfile, key, value));
-            row(key + "-label-64", setting(supportedProfile, key, QByteArray(64, 'a') + ".test"));
-            row(key + "-total-254", setting(supportedProfile, key, QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(62, 'd')));
-            row(key + "-unicode", setting(supportedProfile, key, QByteArray::fromHex("c3a9") + ".test"));
+            row(key + "-label-64", setting(supportedProfile, key, QByteArray(64, 'a') + ".wvd.microsoft.com"));
+            row(key + "-total-254", setting(supportedProfile, key, QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(44, 'd') + ".wvd.microsoft.com"));
+            row(key + "-unicode", setting(supportedProfile, key, QByteArray::fromHex("c3a9") + ".wvd.microsoft.com"));
         }
-        row("address-port-443", setting(supportedProfile, "full address", "example.test:443"));
+        // Hosts outside Microsoft's AVD zones would receive the Windows 365 access token.
+        // Both addresses change together so only the host rule can reject them.
+        for (const QByteArray value : {"example.test", "gateway.example.test", "wvd.microsoft.com", "WVD.MICROSOFT.COM", "wvd.azure.us", "evilwvd.microsoft.com",
+                 "fixture.wvd.microsoft.com.example.test", "fixture.wvd-microsoft.com", "fixture.microsoft.com", "fixture.wvd.microsoft.co",
+                 "fixture.wvd.azure.cn", "fixture.wvd.azure.us.example.test", "example.test:443", "wvd.microsoft.com:443"}) {
+            row("foreign-address-" + value, setting(setting(fullerProfile, "full address", value), "alternate full address", value));
+            row("foreign-gatewayhostname-" + value, setting(fullerProfile, "gatewayhostname", value));
+        }
+        row("address-port-443", setting(supportedProfile, "full address", "fixture.wvd.microsoft.com:443"));
         for (const auto& pair : QList<QPair<QByteArray, QByteArray>>{{"fixture_group", ""}, {"fixture_group", QByteArray(91, 'g')}, {"fixture_group", "group.name"}, {"fixture-pool", ""}, {"fixture-pool", QByteArray(65, 'h')}, {"fixture-pool", "pool/name"}, {"/subscriptions/", "https://example.test/subscriptions/"}, {"/resourcegroups/", "/resourcegroup/"}, {"Microsoft.DesktopVirtualization", "Microsoft.Other"}, {"11111111-2222-3333-4444-555555555555", "not-a-uuid"}}) {
             QByteArray bytes = supportedProfile;
             bytes.replace(pair.first, pair.second);
@@ -1283,11 +1296,11 @@ private slots:
                  "geo:s:AU__False\r\nGEO:b:fixture-secret-marker", "geo:s:AU__False\t"})
             geoRejected(QByteArray("serialization-") + line, line);
         geoRejected("non-ascii", QByteArray("geo:s:AU__False") + QByteArray::fromHex("c3a9"));
-        for (const auto& address : {"other.example.test", "cloudpc.example.test:443", "127.0.0.1", "cloudpc.example.test.", "-cloudpc.example.test", "cloudpc..test", "cloudpc_example.test", "https://cloudpc.example.test"})
+        for (const auto& address : {"other.wvd.microsoft.com", "fixture-cloudpc.wvd.microsoft.com:443", "127.0.0.1", "fixture-cloudpc.wvd.microsoft.com.", "-fixture-cloudpc.wvd.microsoft.com", "fixture-cloudpc..wvd.microsoft.com", "fixture_cloudpc.wvd.microsoft.com", "https://fixture-cloudpc.wvd.microsoft.com"})
             row(QByteArray("alternate-") + address, setting(fullerProfile, "alternate full address", address));
-        row("alternate-full-changed", setting(fullerProfile, "full address", "other.example.test"));
-        row("alternate-label-64", setting(fullerProfile, "alternate full address", QByteArray(64, 'a')));
-        row("alternate-total-254", setting(fullerProfile, "alternate full address", QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(62, 'd')));
+        row("alternate-full-changed", setting(fullerProfile, "full address", "other.wvd.microsoft.com"));
+        row("alternate-label-64", setting(fullerProfile, "alternate full address", QByteArray(64, 'a') + ".wvd.microsoft.com"));
+        row("alternate-total-254", setting(fullerProfile, "alternate full address", QByteArray(63, 'a') + '.' + QByteArray(63, 'b') + '.' + QByteArray(63, 'c') + '.' + QByteArray(44, 'd') + ".wvd.microsoft.com"));
         for (const auto& key : {QByteArray("diagnosticserviceurl"), QByteArray("hubdiscoverygeourl")}) {
             const auto start = fullerProfile.indexOf(key + ":s:") + key.size() + 3;
             const auto url = fullerProfile.mid(start, fullerProfile.indexOf("\r\n", start) - start);
@@ -1315,7 +1328,7 @@ private slots:
         }
         for (const auto& label : {"Cloud PC Enterprise 2VCPU/8GB/128GB", "Cloud PC Enterprise 2vCPU/8Gb/128GB", "Cloud PC Enterprise 2vCPU/8GB/128GB/1", "Cloud PC Enterprise 2vCPU /8GB/128GB"})
             row(QByteArray("desktop-syntax-") + label, setting(fullerProfile, "remotedesktopname", label));
-        for (const auto& label : {"", " Example", "Example\"x", "Example:x", QByteArray(65, 'a').constData()})
+        for (const auto& label : QList<QByteArray>{"", " Example", "Example\"x", "Example:x", QByteArray(65, 'a')})
             row(QByteArray("desktop-name-rejected-") + label, setting(fullerProfile, "remotedesktopname", label));
         const QByteArray activityKey = "activityhint:s:";
         const auto activityStart = fullerProfile.indexOf(activityKey) + activityKey.size();

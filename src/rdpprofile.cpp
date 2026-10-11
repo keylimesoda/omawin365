@@ -36,9 +36,18 @@ bool dns(QStringView value)
     return true;
 }
 
+// FreeRDP sends the Windows 365 access token to the gateway named in the file,
+// so connection hosts must be in Microsoft's Azure Virtual Desktop namespaces.
+// This trusts those DNS zones; it does not authenticate the file or its tenant.
+bool microsoftHost(QStringView value)
+{
+    return dns(value) && (value.endsWith(u".wvd.microsoft.com", Qt::CaseInsensitive)
+        || value.endsWith(u".wvd.azure.us", Qt::CaseInsensitive));
+}
+
 // One declaration owns each key's presence, type and complete value grammar.
 // Literal entries deliberately do not admit upstream ranges or arbitrary strings.
-enum class Value { Dns, Gateway, Arm, Routing, Program, Uuid, Literal, BooleanLiteral, Geo, Desktop, Diagnostic, Activity, Hub, OpaqueMetadata };
+enum class Value { Host, Gateway, Arm, Routing, Program, Uuid, Literal, BooleanLiteral, Geo, Desktop, Diagnostic, Activity, Hub, OpaqueMetadata };
 struct Rule {
     const char* key;
     char type;
@@ -47,7 +56,7 @@ struct Rule {
     bool required = false;
 };
 constexpr Rule rules[] = {
-    {"full address", 's', Value::Dns, nullptr, true},
+    {"full address", 's', Value::Host, nullptr, true},
     {"gatewayhostname", 's', Value::Gateway, nullptr, true},
     {"armpath", 's', Value::Arm, nullptr, true},
     {"loadbalanceinfo", 's', Value::Routing, nullptr, true},
@@ -58,7 +67,7 @@ constexpr Rule rules[] = {
     {"wvd endpoint pool", 's', Value::Uuid},
     {"workspace id", 's', Value::Uuid},
     {"geo", 's', Value::Geo},
-    {"alternate full address", 's', Value::Dns}, // Also compared to full address after all lines.
+    {"alternate full address", 's', Value::Host}, // Also compared to full address after all lines.
     {"diagnosticserviceurl", 's', Value::Diagnostic},
     {"hubdiscoverygeourl", 's', Value::Hub},
     {"remotedesktopname", 's', Value::Desktop},
@@ -141,11 +150,11 @@ bool supportedValue(const Rule& rule, QStringView value)
     static const QRegularExpression hub(QStringLiteral("\\Ahttps://") + authority +
         QStringLiteral("/api/arm/hubdiscovery\\?resourceId=") + uuid + QStringLiteral("\\z"));
     switch (rule.value) {
-    case Value::Dns: return dns(value);
+    case Value::Host: return microsoftHost(value);
     case Value::Gateway:
         if (value.endsWith(u":443"))
             value.chop(4);
-        return dns(value);
+        return microsoftHost(value);
     case Value::Arm: return arm.matchView(value).hasMatch();
     case Value::Routing: return routing.matchView(value).hasMatch();
     case Value::Program: return program.matchView(value).hasMatch();

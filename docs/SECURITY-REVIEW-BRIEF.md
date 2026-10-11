@@ -44,7 +44,7 @@ The enforced rules are summarized in [BOUNDARIES.md](BOUNDARIES.md).
 ## Already checked
 
 - Independent AI reviews (Claude Code CLI and Codex), a written threat model, and a findings ledger with a verdict and evidence for every item: summary in [VERIFICATION.md](VERIFICATION.md).
-- Seven confirmed findings fixed with failing-then-passing tests, including an IP-literal bypass of the hostname rule and a foreign-frame download substitution.
+- Confirmed findings fixed with failing-then-passing tests, including an IP-literal bypass of the hostname rule, a foreign-frame download substitution, and a gateway host that could be anything in an imported file (reported in [#1](https://github.com/vichong/omawin365/issues/1)).
 - All suites pass under ASan and UBSan with leak detection; clang static analyzer clean; bounded fuzzing of the prompt parser and file import.
 - An `strace` of a live session: file, process and network activity. It led to keeping Chromium crash data private and blocking Chromium's Google background services.
 

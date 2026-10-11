@@ -4,8 +4,8 @@
 
 // Invented connection metadata, never copied from a portal export or real profile.
 inline const QByteArray supportedProfile =
-    "full address:s:cloudpc.example.test\r\n"
-    "gatewayhostname:s:gateway.example.test\r\n"
+    "full address:s:fixture-cloudpc.wvd.microsoft.com\r\n"
+    "gatewayhostname:s:fixture-gateway.wvd.microsoft.com\r\n"
     "armpath:s:/subscriptions/11111111-2222-3333-4444-555555555555/resourcegroups/fixture_group/providers/Microsoft.DesktopVirtualization/hostpools/fixture-pool\r\n"
     "loadbalanceinfo:s:mth://localhost/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/01234567-89ab-cdef-0123-456789abcdef\r\n"
     "remoteapplicationprogram:s:||99999999-8888-7777-6666-555555555555\r\n";
@@ -15,7 +15,7 @@ inline const QByteArray euOptionalSettings =
     "wvd endpoint pool:s:22222222-3333-4444-5555-666666666666\r\n"
     "workspace id:s:33333333-4444-5555-6666-777777777777\r\n"
     "geo:s:EU\r\n"
-    "alternate full address:s:CLOUDPC.example.test\r\n"
+    "alternate full address:s:FIXTURE-CLOUDPC.wvd.microsoft.com\r\n"
     "diagnosticserviceurl:s:https://rdweb-g-eu-r1.wvd.microsoft.com/api/arm/DiagnosticEvents/v1\r\n"
     "hubdiscoverygeourl:s:https://rdweb-g-eu-r1.wvd.microsoft.com/api/arm/hubdiscovery?resourceId=44444444-5555-6666-7777-888888888888\r\n"
     "remotedesktopname:s:Cloud PC Enterprise 2vCPU/8GB/128GB\r\n"

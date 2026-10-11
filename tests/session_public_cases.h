@@ -1324,6 +1324,9 @@ private slots:
         QTest::newRow("saved-unknown") << (supportedProfile + "fixture-secret-marker:s:fixture-secret-marker\n");
         QTest::newRow("saved-duplicate") << (supportedProfile + "FULL ADDRESS:s:fixture-secret-marker\n");
         QTest::newRow("saved-malformed") << (supportedProfile + "/cert:ignore\n");
+        // Saved under the DNS-only rules: a foreign gateway or address must not launch.
+        QTest::newRow("saved-foreign-gateway") << QByteArray(supportedProfile).replace("fixture-gateway.wvd.microsoft.com", "fixture-gateway.example.test:443");
+        QTest::newRow("saved-foreign-address") << QByteArray(supportedProfile).replace("fixture-cloudpc.wvd.microsoft.com", "fixture-cloudpc.example.test");
     }
     void publicSavedProfilePolicy()
     {

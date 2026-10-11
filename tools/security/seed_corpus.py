@@ -71,8 +71,8 @@ for index, (name, data) in enumerate(prompt_seeds.items()):
     save(prompt, name, bytes([index, 17, index * 7, 0]) + data)
 
 valid = (
-    b"full address:s:cloudpc.example.test\r\n"
-    b"gatewayhostname:s:gateway.example.test\r\n"
+    b"full address:s:fixture-cloudpc.wvd.microsoft.com\r\n"
+    b"gatewayhostname:s:fixture-gateway.wvd.microsoft.com\r\n"
     b"armpath:s:/subscriptions/11111111-2222-3333-4444-555555555555/resourcegroups/fixture_group/providers/Microsoft.DesktopVirtualization/hostpools/fixture-pool\r\n"
     b"loadbalanceinfo:s:mth://localhost/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/01234567-89ab-cdef-0123-456789abcdef\r\n"
     b"remoteapplicationprogram:s:||99999999-8888-7777-6666-555555555555\r\n"
@@ -93,7 +93,7 @@ profile_seeds = {
     "truncated-utf16": b"\xff\xfe" + valid.decode().encode("utf-16le") + b"a",
     "utf16-surrogate": b"\xff\xfe" + valid.decode().encode("utf-16le") + b"\x00\xd8",
     "wrapper": b'{"url":"rdp://fixture.example.test"}',
-    "missing-arm": b"full address:s:fixture.example.test\ngatewayhostname:s:fixture.example.test\n",
+    "missing-arm": b"full address:s:fixture.wvd.microsoft.com\ngatewayhostname:s:fixture-gateway.wvd.microsoft.com\n",
     "case-duplicate": valid + b"FULL ADDRESS:s:other.example.test\nfull address:i:1\n",
     "cli-option": valid + b"/cert:ignore\n",
     "bare-cr": valid + b"fixture:s:a\rb\n",
