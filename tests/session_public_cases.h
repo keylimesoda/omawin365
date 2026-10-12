@@ -296,13 +296,14 @@ private slots:
         QTest::addColumn<QString>("version");
         QTest::addColumn<int>("code");
         QTest::addColumn<bool>("supported");
-        QTest::newRow("stock") << QStringLiteral("This is FreeRDP version 3.32.1\n") << 0 << true;
-        QTest::newRow("package-prefix") << QStringLiteral("This is FreeRDP version [fixture] 3.32.1 (build)\n") << 0 << true;
+        QTest::newRow("stock") << QStringLiteral("This is FreeRDP version 3.32.2\n") << 0 << true;
+        QTest::newRow("package-prefix") << QStringLiteral("This is FreeRDP version [fixture] 3.32.2 (build)\n") << 0 << true;
         QTest::newRow("legacy-3.31.1") << QStringLiteral("This is FreeRDP version 3.31.1\n") << 0 << false;
+        QTest::newRow("previous-3.32.1") << QStringLiteral("This is FreeRDP version 3.32.1\n") << 0 << false;
         QTest::newRow("wrong-version") << QStringLiteral("This is FreeRDP version 3.31.2\n") << 0 << false;
-        QTest::newRow("suffix-not-version") << QStringLiteral("This is FreeRDP version 3.32.10\n") << 0 << false;
-        QTest::newRow("nonzero") << QStringLiteral("This is FreeRDP version 3.32.1\n") << 1 << false;
-        QTest::newRow("oversized") << (QStringLiteral("This is FreeRDP version 3.32.1\n") + QString(4096, 'x')) << 0 << false;
+        QTest::newRow("suffix-not-version") << QStringLiteral("This is FreeRDP version 3.32.20\n") << 0 << false;
+        QTest::newRow("nonzero") << QStringLiteral("This is FreeRDP version 3.32.2\n") << 1 << false;
+        QTest::newRow("oversized") << (QStringLiteral("This is FreeRDP version 3.32.2\n") + QString(4096, 'x')) << 0 << false;
     }
     void publicVersionGate()
     {
@@ -325,7 +326,7 @@ private slots:
         } else {
             QTRY_COMPARE_WITH_TIMEOUT(fixture.ended.count(), 1, 3000);
             QCOMPARE(fixture.errors.count(), 1);
-            QCOMPARE(fixture.errors.at(0).at(0).toString(), QStringLiteral("FreeRDP 3.32.1 built with WITH_SSO_MIB=OFF is required (the omawin365-freerdp package); executable verification failed."));
+            QCOMPARE(fixture.errors.at(0).at(0).toString(), QStringLiteral("FreeRDP 3.32.2 built with WITH_SSO_MIB=OFF is required (the omawin365-freerdp package); executable verification failed."));
         }
         QVERIFY(!fixture.session.active());
         QTest::qWait(100);

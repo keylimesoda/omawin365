@@ -24,3 +24,9 @@ compile_commands.json
 core.*
 /browser-profile/
 /auth-state/
+
+# makepkg outputs under packaging/
+/packaging/*/src/
+/packaging/*/pkg/
+/packaging/freerdp/FreeRDP-*.tar.gz
+*.pkg.tar.zst

@@ -1,8 +1,8 @@
 # Local prototype, NOT submission/release approval. See ../README.md.
 pkgname=omawin365-freerdp
-pkgver=3.32.1
-pkgrel=3
-pkgdesc='Private FreeRDP provider for OMAWIN365 (SSO and camera client off, wildcard SAN fix)'
+pkgver=3.32.2
+pkgrel=1
+pkgdesc='Private FreeRDP provider for OMAWIN365 (SSO and camera client off)'
 arch=('x86_64')
 url='https://www.freerdp.com/'
 license=('Apache-2.0' 'MIT' 'LGPL-2.1-or-later' 'LicenseRef-uwac')
@@ -13,24 +13,14 @@ depends=('alsa-lib' 'e2fsprogs' 'ffmpeg' 'fuse3' 'glibc' 'icu' 'jansson'
          'libxkbcommon' 'libxkbfile' 'libxrandr' 'libxrender' 'libxv'
          'openssl' 'pcsclite' 'sndio' 'systemd-libs' 'wayland' 'zlib')
 makedepends=('cmake' 'pkgconf' 'python')
-_commit=bf217a504e54cc719880c228e82353382cd7d4fa
+_commit=97eff6ddfbbfaa8e42a126d362686bd001ff8bdc
 source=("FreeRDP-$_commit.tar.gz::https://github.com/FreeRDP/FreeRDP/archive/$_commit.tar.gz"
-        'configure.sh' 'accepted-features.txt' 'check-contract.py' 'uwac-NOTICES.txt'
-        '0003-accept-wildcard-dns-san.patch')
-sha256sums=('4a25a61f2e81f8d8832634c6d457edc1b48fc76630cf58c06695a27afdbbecca'
+        'configure.sh' 'accepted-features.txt' 'check-contract.py' 'uwac-NOTICES.txt')
+sha256sums=('e99ebb8bbdd2608fd54fcc8b15c510f89dbc05b166c48339d1b1edea0b30f3c8'
             'cf5b269e8d58804fca9aeccb58a1683499df04ba1ddc2b86cfef1bbe4424227e'
             'a22256b9f5f916cbf103eeb4fae8110ebc89c22125437a223a8aea6f7fed16fc'
-            '90fff62b295aa2d517797af6da997a324612a3c9669883b220eaec0282531d20'
-            'fb1fb33971be8d78ec542c502f0f6c93f1b67228692cb160c394ef239d94cf64'
-            'f6f3084f4ba2d6637e752d22f9bac19e37b6b9401129a1b3d9569b5d6a8c369e')
-
-prepare() {
-  # Upstream WinPR's non-uriparser URL regex rejects '*', so FreeRDP dropped
-  # wildcard certificate names (e.g. *.wvd.microsoft.com) and reported a
-  # gateway name mismatch for valid Windows 365 certificates.
-  patch --directory="$srcdir/FreeRDP-$_commit" --strip=1 --fuzz=0 --forward \
-    < "$srcdir/0003-accept-wildcard-dns-san.patch"
-}
+            'a4fc968a30c8bfae2a342ca65629ed1dc766057544db4e2e2e24d00f41a8df57'
+            'fb1fb33971be8d78ec542c502f0f6c93f1b67228692cb160c394ef239d94cf64')
 
 build() {
   # Recipe chooses cmake via explicit PATH discovery, never inherited CMAKE.

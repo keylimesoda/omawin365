@@ -370,7 +370,6 @@ void Window::showAbout()
     layout->details->addWidget(label(QStringLiteral("© 2026 Vic Hong · MIT licence\nProvided as-is, without warranty."), content));
     layout->details->addWidget(label(QStringLiteral("Wordmark letterforms: David Heinemeier Hansson (MIT).\nWindows 365 mark: Microsoft trademark.\nUses separately installed Qt, FreeRDP and Chromium."), content, "muted"));
     layout->details->addWidget(label(QStringLiteral("Independent community project. Not affiliated with, endorsed by or supported by Microsoft or the Omarchy project."), content, "muted"));
-    layout->details->addWidget(label(QStringLiteral("GitHub links require repository access while this project is private."), content, "muted"));
     auto* linkError = label({}, content, "error");
     linkError->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     linkError->hide();

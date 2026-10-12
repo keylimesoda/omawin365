@@ -8,7 +8,7 @@ A native Qt 6 desktop app (about 6,000 lines of C++ plus one small JavaScript fi
 
 1. **Sign-in.** It starts a private Chromium window, drives Microsoft sign-in over the Chrome DevTools Protocol (anonymous pipes, not a TCP port), and captures the OAuth callback.
 2. **Connection files.** It downloads or imports `.rdpw` connection files, validates them against a strict allowlist, and stores private copies.
-3. **Remote desktop.** It runs FreeRDP 3.32.1 (one small patch) in a private terminal, answers its sign-in prompts, and relays security-key PIN prompts from a native dialog.
+3. **Remote desktop.** It runs unmodified FreeRDP 3.32.2 in a private terminal, answers its sign-in prompts, and relays security-key PIN prompts from a native dialog.
 
 It was written with AI coding agents. It has had extensive AI review but **no human security review yet**. That's why you're here.
 
@@ -29,7 +29,7 @@ Running against a real Cloud PC also needs the private FreeRDP provider: see `pa
 | Sign-in browser control | `src/browserauth.cpp`, `src/portal.js`, `src/oauthcontract.cpp` | Handles OAuth state/PKCE and callbacks, drives a hostile-content browser, accepts one download. |
 | FreeRDP process and prompts | `src/session.cpp`, `src/promptparser.cpp` | Parses untrusted terminal output, sends PINs and sign-in replies, manages process lifetime and signals. |
 | Connection-file validation | `src/rdpprofile.cpp`, `src/profilestore.cpp` | The only barrier between an attacker-supplied `.rdpw` and FreeRDP's settings. |
-| FreeRDP patch | `packaging/freerdp/0003-accept-wildcard-dns-san.patch` | Changes certificate name extraction; merged upstream as [FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653). |
+| FreeRDP build | `packaging/freerdp/` | Builds unmodified FreeRDP 3.32.2 with fixed options and a contract check; the wildcard certificate fix is upstream as [FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653). |
 
 The enforced rules are summarized in [BOUNDARIES.md](BOUNDARIES.md).
 
