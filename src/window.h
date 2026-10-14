@@ -8,6 +8,7 @@ class ProfileStore;
 class Session;
 class Theme;
 class QCloseEvent;
+class QCheckBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
@@ -67,6 +68,10 @@ private:
     QPushButton* m_connect;
     QPushButton* m_disconnect;
     QPushButton* m_reconnect;
+    QCheckBox* m_rememberSignIn;
+    QPushButton* m_forgetSignIn;
+    QLabel* m_signInCacheNote;
+    bool m_forgettingSignIn = false;
     QVBoxLayout* m_contentLayout;
     QWidget* m_connectionPanel;
     QVBoxLayout* m_statusLayout;

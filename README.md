@@ -17,9 +17,33 @@ Other tenants and editions are untested. It has had extensive AI-assisted review
 
 Not affiliated with, endorsed by or supported by Microsoft or Omarchy. Microsoft, Windows, Windows 365 and the redrawn Windows 365 mark are Microsoft trademarks, used here only for identification. Provided **as-is, without warranty**, under the [MIT license](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).
 
+## Remember Microsoft sign-in
+
+Enable **Remember Microsoft sign-in on this device** to retain Microsoft's persistent
+sign-in cookies in your desktop's Secret Service keyring (for example GNOME Keyring
+or KWallet with Secret Service enabled). This is off by default. If Microsoft offers
+**Stay signed in**, accept it to allow a persistent session. Your organization's
+Conditional Access policy, cookie expiration and revocation still apply; Microsoft
+can require your passkey again. Federated identity providers may require their own
+sign-in because their cookies are not saved.
+
+**Forget Microsoft sign-in**, or turning remembering off, deletes the saved item and
+closes the private sign-in browser. These controls are available while disconnected.
+This only clears OMAWIN365's local sign-in state; it does not revoke Microsoft sessions
+or sign you out of other applications. A deletion failure is shown so you can unlock
+the keyring and retry. If the keyring is missing or locked and cannot be opened, sign-in
+continues normally without a plaintext cache fallback.
+
+FreeRDP still obtains fresh connection tokens using its existing OAuth flow. OMAWIN365
+saves only unexpired, secure, persistent cookies for `login.microsoftonline.com`;
+session-only cookies, passwords, PINs, passkeys, OAuth tokens and entire browser profiles are
+not saved. The live Chromium profile, cache and temporary files remain in private tmpfs
+storage. Keyring protection and unlock behavior depend on your Secret Service provider;
+applications running as your user may be able to access an unlocked keyring.
+
 ## Build
 
-On Omarchy/Arch with Qt 6.11 (`qt6-base`, `qt6-wayland`, `qt6-svg`), a C++20 compiler, `libx11` and `fontconfig`. Chromium and XWayland are needed at run time.
+On Omarchy/Arch with Qt 6.11 (`qt6-base`, `qt6-wayland`, `qt6-svg`), a C++20 compiler, `libx11`, `libsecret` and `fontconfig`. Chromium and XWayland are needed at run time.
 
 ```sh
 make -j4

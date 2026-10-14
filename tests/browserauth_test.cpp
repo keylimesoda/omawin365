@@ -44,6 +44,120 @@ struct BrowserAuthTestAccess {
         return BrowserAuth::validateAuthorization(url, &state) && state && *state == expected;
     }
 
+    static void signInCache(const std::function<void(bool, const char*)>& check)
+    {
+        const auto prepare = [](BrowserAuth& browser) {
+            auto& state = *browser.d;
+            state.writeFd = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+            state.active = true;
+            state.rememberSignIn = true;
+        };
+        {
+            BrowserAuth browser;
+            prepare(browser);
+            auto& state = *browser.d;
+            int completed = 0;
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            check(completed == 0 && state.pending.value(id).method == "Storage.getCookies",
+                  "snapshot waits for the browser cookie response");
+            state.handleMessage({{"id", id}, {"error", QJsonObject{{"code", -1}}}});
+            check(completed == 1 && state.active,
+                  "optional cookie-export failure still completes authentication");
+        }
+        {
+            BrowserAuth browser;
+            prepare(browser);
+            auto& state = *browser.d;
+            int completed = 0;
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            browser.cancel();
+            state.handleMessage({{"id", id}, {"result", QJsonObject{{"cookies", QJsonArray{}}}}});
+            check(completed == 0 && !state.active,
+                  "cancellation retires an in-flight cookie snapshot without publishing authentication");
+        }
+        {
+            BrowserAuth browser;
+            prepare(browser);
+            auto& state = *browser.d;
+            int completed = 0;
+            QObject::connect(&browser, &BrowserAuth::signInCacheNotice, [&] { browser.cancel(); });
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            state.handleMessage({{"id", id}, {"error", QJsonObject{{"code", -1}}}});
+            check(completed == 0 && !state.active,
+                  "reentrant cancellation from cache notice cannot publish a stale callback");
+        }
+        {
+            BrowserAuth browser;
+            prepare(browser);
+            auto& state = *browser.d;
+            state.restoreCookies = {QJsonObject{{"name", "fictional"}}};
+            const int id = state.nextId;
+            state.prepareFlow();
+            check(state.pending.value(id).method == "Storage.setCookies" && state.restoreCookies.isEmpty(),
+                  "remembered cookies are restored once before preparing any sign-in page");
+            state.handleMessage({{"id", id}, {"result", QJsonObject{}}});
+            check(state.pending.value(id + 1).method == "Browser.setDownloadBehavior",
+                  "sign-in preparation resumes after cookie restoration acknowledgement");
+        }
+        {
+            BrowserAuth browser;
+            prepare(browser);
+            auto& state = *browser.d;
+            int completed = 0;
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            state.pending[id].deadline = -1;
+            QMetaObject::invokeMethod(&state.watchdog, "timeout", Qt::DirectConnection);
+            check(completed == 1 && state.active && !state.pending.contains(id),
+                  "cookie-export timeout falls back without failing authentication");
+        }
+        {
+            BrowserAuth browser;
+            auto& state = *browser.d;
+            browser.setRememberSignIn(true);
+            state.loadingCache = true;
+            browser.cancel();
+            const double now = QDateTime::currentSecsSinceEpoch();
+            const QJsonObject cookie{{"name", "ESTSAUTHPERSISTENT"}, {"value", "fictional"},
+                {"domain", ".login.microsoftonline.com"}, {"path", "/"},
+                {"secure", true}, {"httpOnly", true}, {"expires", now + 3600}};
+            emit state.cache.loaded(SignInCookies::encode({cookie}, now), true);
+            check(!state.loadingCache && !state.active && state.process.state() == QProcess::NotRunning,
+                  "keyring load completing after cancellation cannot start a browser");
+            state.loadingCache = true;
+            browser.setRememberSignIn(false);
+            check(!state.loadingCache && state.restoreCookies.isEmpty(),
+                  "disabling persistence retires a load that Forget may drop from the queue");
+        }
+        {
+            const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+            qputenv("XDG_RUNTIME_DIR", "/nonexistent-omawin365-fixture");
+            BrowserAuth browser;
+            auto& state = *browser.d;
+            state.active = true;
+            state.rememberSignIn = true;
+            state.startBrowser();
+            check(!state.loadingCache && !state.active,
+                  "unsafe runtime storage is rejected before accessing remembered credentials");
+            if (runtime.isNull()) qunsetenv("XDG_RUNTIME_DIR");
+            else qputenv("XDG_RUNTIME_DIR", runtime);
+        }
+        {
+            BrowserAuth browser;
+            auto& state = *browser.d;
+            state.writeFd = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+            state.active = true;
+            int completed = 0;
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            check(completed == 1 && state.nextId == id,
+                  "default private mode never exports cookies or accesses the keyring");
+        }
+    }
+
     static void acquisition(const std::function<void(bool, const char*)>& check)
     {
         const QJsonArray resources{
@@ -138,6 +252,7 @@ struct BrowserAuthTestAccess {
     {
         struct Capture {
             int reader = -1;
+            BrowserAuth::Private* transport = nullptr;
             QByteArray bytes;
             QList<QJsonObject> frames;
             bool valid = true;
@@ -146,8 +261,13 @@ struct BrowserAuthTestAccess {
             {
                 char buffer[4096];
                 ssize_t count;
-                while ((count = ::read(reader, buffer, sizeof(buffer))) > 0)
-                    bytes.append(buffer, count);
+                do {
+                    // Match the production nonblocking transport, and drain queued
+                    // frames even when the kernel gives the fixture a small pipe.
+                    if (transport) transport->flushWrites();
+                    while ((count = ::read(reader, buffer, sizeof(buffer))) > 0)
+                        bytes.append(buffer, count);
+                } while (transport && !transport->output.isEmpty());
                 qsizetype delimiter;
                 while ((delimiter = bytes.indexOf('\0')) >= 0) {
                     QJsonParseError error;
@@ -190,8 +310,10 @@ struct BrowserAuthTestAccess {
             const bool started = state.process.waitForStarted(3000);
             closeFd(state.anchorRead);
             const bool piped = started && privatePipe(&capture.reader, &state.writeFd)
-                && nonblocking(capture.reader);
-            check(piped, "isolated lifecycle transport started");
+                && nonblocking(capture.reader) && nonblocking(state.writeFd)
+                && ::fcntl(state.writeFd, F_SETPIPE_SZ, 4096) > 0;
+            capture.transport = &state;
+            check(piped, "isolated lifecycle transport started with a small nonblocking pipe");
             if (!piped) return false;
             state.mode = BrowserAuth::Private::Mode::Authentication;
             state.active = true;
@@ -461,6 +583,7 @@ int main(int argc, char** argv)
           "callback fragment rejected");
     check(!BrowserAuthTestAccess::code(QUrl(endpoint + QStringLiteral("?code=") + QString(65536, QLatin1Char('x')))),
           "oversized callback rejected");
+    BrowserAuthTestAccess::signInCache(check);
     BrowserAuthTestAccess::acquisition(check);
     BrowserAuthTestAccess::handoff(check);
     publicBrowserTests(check);

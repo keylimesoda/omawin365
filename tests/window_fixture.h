@@ -10,6 +10,8 @@
 namespace WindowFixture {
 struct Controls {
     bool active = false;
+    bool rememberSignIn = false;
+    int forgets = 0;
     QStringList starts;
     int stops = 0;
     QStringList pins;

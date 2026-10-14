@@ -1,5 +1,7 @@
 #include "oauthcontract.h"
 #include "browserauth.h"
+#include "signincache.h"
+#include <QDateTime>
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -303,6 +305,11 @@ struct BrowserAuth::Private {
     };
 
     BrowserAuth* owner;
+    SignInCache cache;
+    bool rememberSignIn = false;
+    bool loadingCache = false;
+    bool finishingAuth = false;
+    QJsonArray restoreCookies;
     // Use Arch's real Chromium binary, never the user-configurable flags launcher.
     QString browserExecutable = QStringLiteral("/usr/lib/chromium/chromium");
     QStringList browserArgumentPrefix;
@@ -349,6 +356,20 @@ struct BrowserAuth::Private {
 
     explicit Private(BrowserAuth* q) : owner(q)
     {
+        QObject::connect(&cache, &SignInCache::loaded, owner, [this](const QByteArray& data, bool ok) {
+            loadingCache = false;
+            if (!rememberSignIn) return;
+            restoreCookies = SignInCookies::decode(data, QDateTime::currentSecsSinceEpoch());
+            const quint64 loadedRound = round;
+            if (!ok) emit owner->signInCacheNotice(QStringLiteral("The system keyring could not be opened. Sign in normally; no unprotected cache will be used."));
+            if (active && round == loadedRound && process.state() == QProcess::NotRunning) startBrowser(true);
+        });
+        QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok) {
+            if (!ok) emit owner->signInCacheNotice(QStringLiteral("Microsoft sign-in could not be saved in the system keyring. You may need to sign in again."));
+        });
+        QObject::connect(&cache, &SignInCache::cleared, owner, [this](bool ok) {
+            emit owner->signInForgotten(ok);
+        });
         clock.start();
         portalPoll.setInterval(750);
         QObject::connect(&portalPoll, &QTimer::timeout, owner, [this] { pollPortal(); });
@@ -367,6 +388,12 @@ struct BrowserAuth::Private {
                     ++it;
                 } else if (active && it->round == round
                            && (it->session.isEmpty() || pageForSession(it->session))) {
+                    if (it->method == QStringLiteral("Storage.getCookies") || it->method == QStringLiteral("Storage.setCookies")) {
+                        auto ready = std::move(it->ready);
+                        pending.erase(it);
+                        ready({}); // Optional caching never prevents authentication.
+                        return;
+                    }
                     transportFailure(QStringLiteral("The sign-in browser stopped responding."));
                     return;
                 } else {
@@ -445,6 +472,7 @@ struct BrowserAuth::Private {
     void clearRound()
     {
         auth = {};
+        finishingAuth = false;
         creating = false;
         target.clear();
         pages.clear();
@@ -621,7 +649,7 @@ struct BrowserAuth::Private {
         emit owner->failed(message);
     }
 
-    void startBrowser()
+    void startBrowser(bool cacheReady = false)
     {
         const QString executable = browserExecutable;
         const QString runtime = privateRuntimePath();
@@ -631,6 +659,13 @@ struct BrowserAuth::Private {
         }
         if (!QFileInfo(executable).isExecutable()) {
             failRound(QStringLiteral("Chromium is required for Microsoft sign-in. Install the Chromium package."));
+            return;
+        }
+        if (rememberSignIn && !cacheReady) {
+            if (!loadingCache) {
+                loadingCache = true;
+                cache.load();
+            }
             return;
         }
         profile = std::make_unique<QTemporaryDir>(runtime + QStringLiteral("/omawin365-auth-XXXXXX"));
@@ -736,7 +771,8 @@ struct BrowserAuth::Private {
             return;
         }
         if (ready)
-            pending.insert(id, Pending{round, method, session, clock.elapsed() + CommandTimeoutMs,
+            pending.insert(id, Pending{round, method, session, clock.elapsed()
+                + ((method == QStringLiteral("Storage.getCookies") || method == QStringLiteral("Storage.setCookies")) ? 3000 : CommandTimeoutMs),
                                        std::move(ready), generation});
         queuedBytes += frame.size();
         output.enqueue(std::move(frame));
@@ -848,6 +884,10 @@ struct BrowserAuth::Private {
             if (!command.session.isEmpty() && !pageForSession(command.session))
                 return;
             if (message.contains(QStringLiteral("error"))) {
+                if (command.method == QStringLiteral("Storage.getCookies") || command.method == QStringLiteral("Storage.setCookies")) {
+                    command.ready({});
+                    return;
+                }
                 failRound(QStringLiteral("The browser could not prepare the current request securely."));
                 return;
             }
@@ -950,6 +990,12 @@ struct BrowserAuth::Private {
 
     void prepareFlow()
     {
+        if (rememberSignIn && !restoreCookies.isEmpty()) {
+            const auto cookies = std::exchange(restoreCookies, QJsonArray{});
+            send(QStringLiteral("Storage.setCookies"), {{QStringLiteral("cookies"), cookies}}, {},
+                [this](const QJsonObject&) { prepareFlow(); });
+            return;
+        }
         if (mode == Mode::Acquisition) {
             download.directory = std::make_unique<QTemporaryDir>(profile->path() + QStringLiteral("/download-XXXXXX"));
             if (!download.directory->isValid()) {
@@ -1292,6 +1338,19 @@ struct BrowserAuth::Private {
         failRound(QStringLiteral("The selected Cloud PC is no longer available. Find your Cloud PCs again or import a trusted .rdpw file manually."));
     }
 
+    void snapshotSignIn(std::function<void()> complete)
+    {
+        if (!rememberSignIn) { complete(); return; }
+        const quint64 snapshotRound = round;
+        send(QStringLiteral("Storage.getCookies"), {}, {}, [this, snapshotRound, complete = std::move(complete)](const QJsonObject& result) {
+            if (rememberSignIn && result.value(QStringLiteral("cookies")).isArray())
+                cache.save(SignInCookies::encode(result.value(QStringLiteral("cookies")).toArray(), QDateTime::currentSecsSinceEpoch()));
+            else
+                emit owner->signInCacheNotice(QStringLiteral("Microsoft sign-in could not be remembered. You may need to sign in again."));
+            if (active && round == snapshotRound) complete();
+        });
+    }
+
     void pausedRequest(const QJsonObject& params, const QString& session, const QString& mainFrame)
     {
         const QString requestId = params.value(QStringLiteral("requestId")).toString();
@@ -1328,12 +1387,16 @@ struct BrowserAuth::Private {
         QByteArray canonical = OAuthContract::serialize(OAuthContract::reply(url, auth.contract->state));
         canonical.chop(1); // Already validated; serialization includes exactly one newline.
         const OAuthContract::Callback result{QUrl::fromEncoded(canonical, QUrl::StrictMode), auth.contract->generation};
-        active = false;
-        auth = {};
-        // Local data: content, never a fabricated HTTP response from Microsoft's endpoint.
-        send(QStringLiteral("Page.navigate"), {{QStringLiteral("url"), completionPage()}}, session, {});
-        diagnostic(QStringLiteral("browser-auth-callback-complete"));
-        emit owner->callbackReady(result);
+        if (finishingAuth) return; // Do not hand off the same one-use code twice.
+        finishingAuth = true;
+        snapshotSignIn([this, result, session] {
+            active = false;
+            auth = {};
+            // Local data: content, never a fabricated HTTP response from Microsoft's endpoint.
+            send(QStringLiteral("Page.navigate"), {{QStringLiteral("url"), completionPage()}}, session, {});
+            diagnostic(QStringLiteral("browser-auth-callback-complete"));
+            emit owner->callbackReady(result);
+        });
     }
 
     void downloadStarted(const QJsonObject& params)
@@ -1398,11 +1461,15 @@ struct BrowserAuth::Private {
         }
         // Direct UI connection imports synchronously. Reentrant begin/cancel cannot delete
         // this directory before its consumer returns because ownership is local here.
-        auto completedDirectory = std::move(download.directory);
+        auto completedDirectory = std::shared_ptr<QTemporaryDir>(std::move(download.directory));
         const QString displayName = download.displayName;
-        cancelRound();
-        emit owner->profileDownloaded(destination, displayName);
-        QFile::remove(destination);
+        download.phase = Download::Phase::Unarmed;
+        portalPoll.stop();
+        snapshotSignIn([this, completedDirectory, destination, displayName] {
+            cancelRound();
+            emit owner->profileDownloaded(destination, displayName);
+            QFile::remove(destination);
+        });
     }
 };
 
@@ -1466,4 +1533,22 @@ void BrowserAuth::cancel()
     d->cancelRound();
     if (wasActive)
         emit status(QStringLiteral("The browser request was cancelled."));
+}
+
+void BrowserAuth::setRememberSignIn(bool enabled)
+{
+    d->rememberSignIn = enabled;
+    if (!enabled) {
+        d->restoreCookies = {};
+        // Forget can drop a queued load before it produces a loaded signal.
+        d->loadingCache = false;
+    }
+}
+
+void BrowserAuth::forgetSignIn()
+{
+    setRememberSignIn(false);
+    ++d->round;
+    d->shutdownBrowser(); // Also erase the live browser's cookies.
+    d->cache.clear(); // Serialized after any in-flight save.
 }

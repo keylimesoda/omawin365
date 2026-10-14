@@ -49,3 +49,8 @@ LIBS += -lutil -lX11
 
 SOURCES += src/oauthcontract.cpp
 HEADERS += src/oauthcontract.h
+
+CONFIG += link_pkgconfig
+PKGCONFIG += libsecret-1
+SOURCES += src/signincache.cpp
+HEADERS += src/signincache.h

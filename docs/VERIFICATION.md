@@ -4,7 +4,7 @@ Status as of October 2026. "Verified" means observed or tested as described, not
 
 ## Automated tests
 
-`make test` runs six suites (profiles, prompt parser, window, two session suites, browser automation): about 4,100 QtTest checks and 215 browser-automation assertions, all passing. They use synthetic connection files, a fake FreeRDP and synthetic Chromium; no Microsoft account, real profile or security key is involved. All six also pass under AddressSanitizer and UndefinedBehaviorSanitizer with leak detection.
+`make test` runs seven suites (profiles, prompt parser, window, two session suites, browser automation and sign-in cache). They use synthetic connection files, a fake FreeRDP, synthetic Chromium and an in-memory Secret Service adapter; no Microsoft account, real profile, personal keyring or security key is involved. The original six-suite baseline also passed under AddressSanitizer and UndefinedBehaviorSanitizer with leak detection. Those sanitizer and static-analysis results predate the remembered-sign-in change; its checks are recorded below.
 
 ## Static and dynamic analysis
 
@@ -36,3 +36,12 @@ On the maintainer's Windows 365 Enterprise tenant, with a hardware security key:
 - cancelling during sign-in, and unplugging the key during sign-in.
 
 Not yet checked: other tenants, Frontline and other editions, multi-monitor.
+
+## Remembered sign-in checks (October 14, 2026)
+
+- Application build and all seven test suites, including cookie domain, expiry, session-only/partitioned-cookie exclusion, cache bounds, cancellation, failed keyring operations and Forget racing a pending save.
+- BrowserAuth checks for restoring cookies before navigation, optional cookie-call failure/timeout, cancellation while loading/snapshotting and rejecting unsafe runtime storage before accessing the keyring. Window checks cover preference/deletion feedback, active-session controls and narrow layouts.
+- A separate smoke check against a real private Secret Service saved, reloaded, deleted and confirmed absence of a fictional item. Another used real Chromium CDP to restore/export a fictional Microsoft-domain persistent cookie and compare its expiry, Secure, HttpOnly and SameSite attributes. No live sign-in was attempted.
+- UI preference and Forget checked in an isolated omabox desktop (Omarchy 4.0.4-1, Hyprland 0.56.2, 1920×1080, scale 1, 0xleovision theme). The disposable keyring uses an empty password: this checks integration, not encryption at rest.
+
+Not yet checked for this feature: live Windows 365/FreeRDP/passkey reuse, tenant Conditional Access behavior, federated sign-in, or other Secret Service providers. The keyring provider controls encryption and unlocking. No credentials or real browser state were used in these checks.

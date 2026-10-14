@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QBoxLayout>
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QEvent>
@@ -157,6 +158,52 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_contentLayout->addWidget(signatureNotice);
     m_contentLayout->addWidget(label(QStringLiteral("Your desktop opens in a separate FreeRDP window. Private Microsoft sign-in may appear several times; follow each prompt."), content, "muted"));
     m_contentLayout->addWidget(label(QStringLiteral("Tested with Windows 365 Enterprise. Other editions are not yet verified."), content, "muted"));
+    auto* rememberRow = new QWidget(content);
+    rememberRow->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    auto* rememberLayout = new QHBoxLayout(rememberRow);
+    rememberLayout->setContentsMargins(0, 0, 0, 0);
+    m_rememberSignIn = new QCheckBox(rememberRow);
+    m_rememberSignIn->setObjectName(QStringLiteral("rememberSignIn"));
+    m_rememberSignIn->setAccessibleName(QStringLiteral("Remember Microsoft sign-in on this device"));
+    auto* rememberCaption = label(QStringLiteral("Remember Microsoft sign-in on this &device"), rememberRow);
+    rememberCaption->setBuddy(m_rememberSignIn);
+    rememberLayout->addWidget(m_rememberSignIn, 0, Qt::AlignTop);
+    rememberLayout->addWidget(rememberCaption, 1);
+    m_rememberSignIn->setChecked(QSettings().value(QStringLiteral("rememberSignIn"), false).toBool());
+    m_browser->setRememberSignIn(m_rememberSignIn->isChecked());
+    m_contentLayout->addWidget(rememberRow);
+    m_signInCacheNote = label(QStringLiteral("Uses your system keyring. Choose ‘Stay signed in’ at Microsoft if offered. Your organization may still require your passkey."), content, "muted");
+    m_signInCacheNote->setObjectName(QStringLiteral("signInCacheNote"));
+    m_contentLayout->addWidget(m_signInCacheNote);
+    m_forgetSignIn = new WrappedButton(QStringLiteral("&Forget Microsoft sign-in"), content);
+    m_forgetSignIn->setObjectName(QStringLiteral("forgetSignIn"));
+    m_contentLayout->addWidget(m_forgetSignIn);
+    const auto forgetSignIn = [this] {
+        m_forgettingSignIn = true;
+        QSettings().setValue(QStringLiteral("rememberSignIn"), false);
+        {
+            QSignalBlocker blocked(m_rememberSignIn);
+            m_rememberSignIn->setChecked(false);
+        }
+        m_signInCacheNote->setText(QStringLiteral("Removing Microsoft sign-in from the system keyring…"));
+        updateControls();
+        m_browser->forgetSignIn();
+    };
+    connect(m_rememberSignIn, &QCheckBox::toggled, this, [this, forgetSignIn](bool enabled) {
+        if (!enabled) { forgetSignIn(); return; }
+        QSettings().setValue(QStringLiteral("rememberSignIn"), true);
+        m_browser->setRememberSignIn(true);
+        m_signInCacheNote->setText(QStringLiteral("Uses your system keyring. Choose ‘Stay signed in’ at Microsoft if offered. Your organization may still require your passkey."));
+    });
+    connect(m_forgetSignIn, &QPushButton::clicked, this, forgetSignIn);
+    connect(m_browser, &BrowserAuth::signInCacheNotice, m_signInCacheNote, &QLabel::setText);
+    connect(m_browser, &BrowserAuth::signInForgotten, this, [this](bool ok) {
+        m_forgettingSignIn = false;
+        m_signInCacheNote->setText(ok
+            ? QStringLiteral("Remembered Microsoft sign-in removed. Your next connection requires sign-in.")
+            : QStringLiteral("The system keyring could not remove the saved sign-in. Remembering is disabled; unlock your keyring and try Forget again."));
+        updateControls();
+    });
     auto* about = new QPushButton(QStringLiteral("&About…"), content);
     about->setObjectName(QStringLiteral("aboutButton"));
     m_contentLayout->addWidget(about, 0, Qt::AlignRight);
@@ -766,6 +813,9 @@ void Window::updateControls()
     markConnectedProfile();
     m_import->setEnabled(!active && !m_acquisition.active && !m_closePending);
     m_acquire->setEnabled(!active && !m_acquisition.active && !m_closePending);
+    const bool canChangeSignIn = !active && !m_acquisition.active && !m_closePending && !m_forgettingSignIn;
+    m_rememberSignIn->parentWidget()->setEnabled(canChangeSignIn);
+    m_forgetSignIn->setEnabled(canChangeSignIn);
 }
 
 void Window::setStatus(const QString& phase, const QString& detail)
@@ -973,6 +1023,10 @@ void Window::showError(const QString& title, const QString& message)
 
 void Window::closeEvent(QCloseEvent* event)
 {
+    if (m_forgettingSignIn) {
+        event->ignore(); // Do not cancel a deletion and claim the sign-in was forgotten.
+        return;
+    }
     if (!m_session->active()) {
         clearAcquisition();
         m_browser->cancel();

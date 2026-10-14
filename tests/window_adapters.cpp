@@ -45,3 +45,6 @@ void BrowserAuth::cancel()
     ++controls.cancellations;
     if (controls.onCancel) controls.onCancel();
 }
+
+void BrowserAuth::setRememberSignIn(bool enabled) { controls.rememberSignIn = enabled; }
+void BrowserAuth::forgetSignIn() { ++controls.forgets; controls.rememberSignIn = false; }

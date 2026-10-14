@@ -14,6 +14,8 @@ public:
     explicit BrowserAuth(QObject* parent = nullptr);
     ~BrowserAuth() override;
     void setDiagnosticsEnabled(bool enabled);
+    void setRememberSignIn(bool enabled);
+    void forgetSignIn();
 
 public slots:
     void begin(const OAuthContract::Request& request);
@@ -22,6 +24,8 @@ public slots:
     void cancel();
 
 signals:
+    void signInCacheNotice(const QString& message);
+    void signInForgotten(bool ok);
     void callbackReady(const OAuthContract::Callback& result);
     void failed(const QString& message);
     // The user closed the sign-in window or browser before the request completed.

@@ -11,6 +11,7 @@
 #include "theme.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QAbstractButton>
 #include <QDialog>
 #include <QDir>
@@ -169,6 +170,41 @@ private:
         });
     }
 private slots:
+    void rememberSignInAndForget()
+    {
+        openWindow();
+        auto* remember = window->findChild<QCheckBox*>("rememberSignIn");
+        auto* forget = window->findChild<QPushButton*>("forgetSignIn");
+        auto* note = window->findChild<QLabel*>("signInCacheNote");
+        QVERIFY(remember && forget && note);
+        QVERIFY(!remember->isChecked());
+        QVERIFY(!controls.rememberSignIn);
+        remember->click();
+        QVERIFY(controls.rememberSignIn);
+        QVERIFY(QSettings().value("rememberSignIn").toBool());
+        remember->click();
+        QCOMPARE(controls.forgets, 1);
+        QVERIFY(!controls.rememberSignIn);
+        QVERIFY(!remember->isEnabled());
+        QVERIFY(!window->close()); // An unfinished deletion must not be abandoned.
+        emit browser->signInForgotten(false);
+        QVERIFY(remember->isEnabled());
+        QVERIFY(note->text().contains("could not remove"));
+        forget->click();
+        QCOMPARE(controls.forgets, 2);
+        emit browser->signInForgotten(true);
+        QVERIFY(note->text().contains("removed"));
+        QVERIFY(!QSettings().value("rememberSignIn").toBool());
+    }
+    void signInControlsDisabledDuringConnection()
+    {
+        seed(); openWindow();
+        QVERIFY(click(window.get(), "Connect"));
+        QVERIFY(!window->findChild<QCheckBox*>("rememberSignIn")->isEnabled());
+        QVERIFY(!window->findChild<QPushButton*>("forgetSignIn")->isEnabled());
+        finish();
+        QVERIFY(window->findChild<QCheckBox*>("rememberSignIn")->isEnabled());
+    }
     void acquisitionInitialFocusAndAutomaticScroll_data()
     {
         QTest::addColumn<QSize>("bounds");
