@@ -11,6 +11,7 @@
 #include "theme.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QAbstractButton>
 #include <QDialog>
 #include <QDir>
@@ -169,6 +170,67 @@ private:
         });
     }
 private slots:
+    void audioOptionsFollowProfilesAndReconnect()
+    {
+        const auto first = seed("Audio PC");
+        seed("Silent PC");
+        openWindow();
+        profiles()->setCurrentRow(0);
+        auto* playback = window->findChild<QCheckBox*>("audioPlayback");
+        auto* capture = window->findChild<QCheckBox*>("audioCapture");
+        QVERIFY(playback && capture);
+        QVERIFY(playback->isEnabled() && capture->isEnabled());
+        QVERIFY(!playback->isChecked() && !capture->isChecked());
+        playback->setFocus();
+        QTest::keyClick(playback, Qt::Key_Space);
+        capture->click();
+        QCOMPARE(controls.starts.size(), 0);
+        QCOMPARE(store->profiles().first().audio.playback, true);
+        QCOMPARE(store->profiles().first().audio.capture, true);
+        profiles()->setCurrentRow(1);
+        QVERIFY(!playback->isChecked() && !capture->isChecked());
+        profiles()->setCurrentRow(0);
+        QVERIFY(playback->isChecked() && capture->isChecked());
+        QVERIFY(click(window.get(), "Connect"));
+        QCOMPARE(controls.audioStarts.size(), 1);
+        QVERIFY(controls.audioStarts.first().playback && controls.audioStarts.first().capture);
+        QVERIFY(!playback->isEnabled() && !capture->isEnabled());
+        QVERIFY(visibleLabelText(window.get(), "Disconnect to change audio settings; reconnect to apply."));
+        playback->setChecked(false); // Programmatic changes cannot alter an active session.
+        QVERIFY(playback->isChecked());
+        profiles()->setCurrentRow(1);
+        QVERIFY(!playback->isChecked() && !capture->isChecked());
+        QVERIFY(click(window.get(), "Reconnect"));
+        finish();
+        QCOMPARE(controls.starts.size(), 2);
+        QCOMPARE(controls.starts.last(), first.path);
+        QVERIFY(controls.audioStarts.last().playback && controls.audioStarts.last().capture);
+        QVERIFY(!playback->isEnabled());
+        QVERIFY(click(window.get(), "Disconnect"));
+        finish();
+        QVERIFY(playback->isEnabled() && capture->isEnabled());
+        QVERIFY(click(window.get(), "Connect"));
+        QVERIFY(!controls.audioStarts.last().playback && !controls.audioStarts.last().capture);
+    }
+
+    void audioOptionsDisabledWithoutProfileAndRestoredOnReopen()
+    {
+        openWindow();
+        auto* playback = window->findChild<QCheckBox*>("audioPlayback");
+        auto* capture = window->findChild<QCheckBox*>("audioCapture");
+        QVERIFY(playback && capture);
+        QVERIFY(!playback->isEnabled() && !capture->isEnabled());
+        seed();
+        QVERIFY(playback->isEnabled() && capture->isEnabled());
+        capture->click();
+        window.reset();
+        store = std::make_unique<ProfileStore>();
+        openWindow();
+        QVERIFY(!window->findChild<QCheckBox*>("audioPlayback")->isChecked());
+        QVERIFY(window->findChild<QCheckBox*>("audioCapture")->isChecked());
+        QCOMPARE(controls.starts.size(), 0);
+    }
+
     void acquisitionInitialFocusAndAutomaticScroll_data()
     {
         QTest::addColumn<QSize>("bounds");

@@ -196,6 +196,7 @@ struct Session::State {
     QTimer versionTimer;
     VersionCheck versionCheck = VersionCheck::Idle;
     QString profilePath;
+    AudioOptions audio;
     QString executable;
     std::unique_ptr<QTemporaryDir> config;
     QSocketNotifier* reader = nullptr;
@@ -390,7 +391,7 @@ bool Session::active() const
     return state_->versionCheck != State::VersionCheck::Idle || state_->child > 0;
 }
 
-void Session::start(const QString& profilePath)
+void Session::start(const QString& profilePath, AudioOptions audio)
 {
     // Terminal delivery/finalization must finish before a receiver can replace it.
     if (state_->terminalNotifications || state_->finalizing)
@@ -404,6 +405,7 @@ void Session::start(const QString& profilePath)
     state_->stopping = false;
     state_->clearAttempt();
     state_->profilePath = profilePath;
+    state_->audio = audio;
     state_->executable = QStandardPaths::findExecutable(QStringLiteral("xfreerdp3"));
     if (state_->executable.isEmpty()) {
         fail(QStringLiteral("xfreerdp3 was not found on PATH; install the omawin365-freerdp package."));
@@ -474,8 +476,10 @@ void Session::startTransport(const QString& profilePath)
         "FreeRDP_RedirectDrives:FALSE,FreeRDP_RedirectHomeDrive:FALSE,"
         "FreeRDP_DrivesToRedirect:,FreeRDP_RedirectPrinters:FALSE,"
         "FreeRDP_RedirectSmartCards:FALSE,FreeRDP_RedirectSerialPorts:FALSE,"
-        "FreeRDP_RedirectParallelPorts:FALSE,FreeRDP_AudioCapture:FALSE,"
-        "FreeRDP_AudioPlayback:FALSE,FreeRDP_SupportSSHAgentChannel:FALSE,"
+        "FreeRDP_RedirectParallelPorts:FALSE,FreeRDP_AudioCapture:"
+        + QByteArray(state_->audio.capture ? "TRUE" : "FALSE")
+        + ",FreeRDP_AudioPlayback:" + QByteArray(state_->audio.playback ? "TRUE" : "FALSE")
+        + ",FreeRDP_SupportSSHAgentChannel:FALSE,"
         "FreeRDP_DeviceRedirection:FALSE,FreeRDP_DeviceCount:0,"
         "FreeRDP_StaticChannelCount:0,FreeRDP_DynamicChannelCount:0,"
         "FreeRDP_AutoReconnectionEnabled:FALSE,FreeRDP_RemoteApplicationMode:FALSE,"

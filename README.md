@@ -15,6 +15,8 @@ It works end to end with Windows 365 Enterprise on the maintainer's tenant, incl
 
 Other tenants and editions are untested. It has had extensive AI-assisted review but **no independent human security review yet**. Please [help review it](#help-review-it) before trusting it with a work account.
 
+Select a Cloud PC and configure **Audio** before connecting: **Play remote audio** sends Windows sound to your default local speakers/headphones, and **Forward microphone** sends your default local microphone to the Cloud PC. Both are off by default and saved separately for each PC. Disconnect before changing them, then connect again. Your organization's remote-session policy can still block audio redirection.
+
 Not affiliated with, endorsed by or supported by Microsoft or Omarchy. Microsoft, Windows, Windows 365 and the redrawn Windows 365 mark are Microsoft trademarks, used here only for identification. Provided **as-is, without warranty**, under the [MIT license](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Build

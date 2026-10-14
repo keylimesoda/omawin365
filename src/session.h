@@ -1,6 +1,7 @@
 #pragma once
 
 #include "oauthcontract.h"
+#include "audiooptions.h"
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -16,7 +17,7 @@ public:
     void setDiagnosticsEnabled(bool enabled);
 
 public slots:
-    void start(const QString& profilePath);
+    void start(const QString& profilePath, AudioOptions audio = {});
     void stop();
     void submitPin(const QString& pin);
     void submitAuthResult(const OAuthContract::Callback& result);

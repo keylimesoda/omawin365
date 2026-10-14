@@ -1403,6 +1403,69 @@ private slots:
         }
     }
 
+    void audioPreferencesPersistWithoutRewritingConnection()
+    {
+        const QString source = temporary->filePath(QStringLiteral("original.rdpw"));
+        QVERIFY(writeFile(source, validProfile));
+        ProfileStore store;
+        QString error;
+        const auto first = store.importFile(source, &error, "First");
+        const auto second = store.importFile(source, &error, "Second");
+        QVERIFY(!first.id.isEmpty() && !second.id.isEmpty());
+        QVERIFY(!first.audio.playback && !first.audio.capture);
+        QSignalSpy changes(&store, &ProfileStore::changed);
+        QVERIFY(store.setAudioOptions(first.id, {true, true}, &error));
+        QCOMPARE(changes.count(), 1);
+        QVERIFY(store.setAudioOptions(first.id, {true, true}, &error));
+        QCOMPARE(changes.count(), 1);
+        QVERIFY(store.renameProfile(first.id, "Renamed", &error));
+        ProfileStore reopened;
+        QCOMPARE(reopened.profiles().size(), 2);
+        QVERIFY(reopened.profiles().first().audio.playback && reopened.profiles().first().audio.capture);
+        QVERIFY(!reopened.profiles().last().audio.playback && !reopened.profiles().last().audio.capture);
+        QCOMPARE(contents(first.path), validProfile);
+        QCOMPARE(contents(source), validProfile);
+        QVERIFY(!store.setAudioOptions("missing", {true, true}, &error));
+        ProfileStore stale;
+        QVERIFY(store.setAudioOptions(first.id, {false, true}, &error));
+        QVERIFY(!stale.setAudioOptions(second.id, {true, false}, &error));
+        ProfileStore current;
+        QVERIFY(!current.profiles().first().audio.playback && current.profiles().first().audio.capture);
+        QVERIFY(!current.profiles().last().audio.playback);
+    }
+
+    void legacyAudioPreferencesDefaultOffAndRejectInvalidTypes()
+    {
+        const QString source = temporary->filePath(QStringLiteral("original.rdpw"));
+        QVERIFY(writeFile(source, validProfile));
+        ProfileStore store;
+        QString error;
+        const auto profile = store.importFile(source, &error);
+        QVERIFY(!profile.id.isEmpty());
+        const QString index = QFileInfo(profile.path).absolutePath() + "/profiles.json";
+        const QJsonObject legacy{{"id", profile.id}, {"name", profile.name}};
+        QVERIFY(writeFile(index, QJsonDocument(QJsonArray{legacy}).toJson()));
+        {
+            ProfileStore reopened;
+            QCOMPARE(reopened.profiles().size(), 1);
+            QVERIFY(!reopened.profiles().first().audio.playback && !reopened.profiles().first().audio.capture);
+            QVERIFY(reopened.setAudioOptions(profile.id, {true, false}, &error));
+        }
+        for (const auto* key : {"audioPlayback", "audioCapture"}) {
+            for (const auto& value : {QJsonValue("true"), QJsonValue(1), QJsonValue(QJsonValue::Null),
+                                     QJsonValue(QJsonObject{}), QJsonValue(QJsonArray{})}) {
+                auto invalid = legacy;
+                invalid.insert(key, value);
+                const auto bytes = QJsonDocument(QJsonArray{invalid}).toJson();
+                QVERIFY(writeFile(index, bytes));
+                ProfileStore reopened;
+                QVERIFY(reopened.profiles().isEmpty());
+                QVERIFY(!reopened.setAudioOptions(profile.id, {true, true}, &error));
+                QCOMPARE(contents(index), bytes);
+            }
+        }
+    }
+
     void removalDeletesOnlyOwnedCopy()
     {
         const QString source = temporary->filePath(QStringLiteral("original.rdpw"));

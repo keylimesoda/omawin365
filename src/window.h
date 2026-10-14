@@ -1,5 +1,7 @@
 #pragma once
 
+#include "audiooptions.h"
+
 #include <QPointer>
 #include <QWidget>
 
@@ -8,6 +10,7 @@ class ProfileStore;
 class Session;
 class Theme;
 class QCloseEvent;
+class QCheckBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
@@ -49,6 +52,9 @@ private:
     void applySpacing();
     QString selectedId() const;
     QString selectedPath() const;
+    AudioOptions audioForPath(const QString& path) const;
+    void refreshAudioOptions();
+    void saveAudioOptions();
 
     Session* m_session;
     BrowserAuth* m_browser;
@@ -67,6 +73,9 @@ private:
     QPushButton* m_connect;
     QPushButton* m_disconnect;
     QPushButton* m_reconnect;
+    QCheckBox* m_audioPlayback;
+    QCheckBox* m_audioCapture;
+    QLabel* m_audioNote;
     QVBoxLayout* m_contentLayout;
     QWidget* m_connectionPanel;
     QVBoxLayout* m_statusLayout;

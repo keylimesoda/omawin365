@@ -408,6 +408,7 @@ void Theme::reload()
         + fill("pressed", pressedColor, 0.22) + "; }";
     style += "QPushButton[primary=true] { color: " + css(accent) + "; }";
     style += "QPushButton:disabled { color: " + css(muted) + "; }";
+    style += "QCheckBox:disabled { color: " + css(muted) + "; }";
     style += "QLineEdit { padding: " + QString::number(spacing("input-padding-y", 7)) + "px "
         + QString::number(spacing("control-padding-x", 10)) + "px; selection-background-color: "
         + css(selection) + "; selection-color: " + css(text) + "; }";

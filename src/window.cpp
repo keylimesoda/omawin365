@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QBoxLayout>
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QEvent>
@@ -137,6 +138,22 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_statusLayout->addWidget(m_detailLabel);
     m_statusLayout->addWidget(m_progressNote);
 
+    m_contentLayout->addWidget(label(QStringLiteral("Audio"), content, "title"));
+    m_audioPlayback = new QCheckBox(QStringLiteral("Play remote &audio"), content);
+    m_audioPlayback->setObjectName(QStringLiteral("audioPlayback"));
+    m_audioPlayback->setToolTip(QStringLiteral("Play Windows sound through your default local speakers or headphones."));
+    m_audioCapture = new QCheckBox(QStringLiteral("Forward &microphone"), content);
+    m_audioCapture->setObjectName(QStringLiteral("audioCapture"));
+    m_audioCapture->setToolTip(QStringLiteral("Allow this Cloud PC to receive audio from your default local microphone."));
+    for (auto* option : {m_audioPlayback, m_audioCapture}) {
+        option->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        m_contentLayout->addWidget(option);
+        connect(option, &QCheckBox::toggled, this, &Window::saveAudioOptions);
+    }
+    m_audioNote = label({}, content, "muted");
+    m_audioNote->setObjectName(QStringLiteral("audioNote"));
+    m_contentLayout->addWidget(m_audioNote);
+
     m_connect = new WrappedButton(QStringLiteral("&Connect"), content);
     m_connect->setProperty("primary", true);
     m_connect->setToolTip(QStringLiteral("Connect to the selected Cloud PC (Ctrl+Return)"));
@@ -169,6 +186,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     connect(m_profiles, &ProfileStore::changed, this, [this] { refreshProfiles(); });
     connect(m_list, &QListWidget::currentRowChanged, this, [this] {
         QSettings().setValue(QStringLiteral("selectedProfile"), selectedId());
+        refreshAudioOptions();
         showIdlePrompt();
         updateControls();
     });
@@ -297,7 +315,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
                 }
             }
             setStatus("connecting", QStringLiteral("Starting a new session…"));
-            m_session->start(path);
+            m_session->start(path, audioForPath(path));
             updateControls();
         }
     });
@@ -480,6 +498,37 @@ QString Window::selectedId() const
     return m_list->currentItem() ? m_list->currentItem()->data(Qt::UserRole).toString() : QString();
 }
 
+AudioOptions Window::audioForPath(const QString& path) const
+{
+    for (const Profile& profile : m_profiles->profiles())
+        if (profile.path == path) return profile.audio;
+    return {};
+}
+
+void Window::refreshAudioOptions()
+{
+    const QSignalBlocker playbackBlocker(m_audioPlayback);
+    const QSignalBlocker captureBlocker(m_audioCapture);
+    const auto audio = audioForPath(selectedPath());
+    m_audioPlayback->setChecked(audio.playback);
+    m_audioCapture->setChecked(audio.capture);
+}
+
+void Window::saveAudioOptions()
+{
+    // Ignore programmatic changes while controls are unavailable too.
+    if (!m_audioPlayback->isEnabled() || !m_audioCapture->isEnabled()) {
+        refreshAudioOptions();
+        return;
+    }
+    QString error;
+    if (!m_profiles->setAudioOptions(selectedId(),
+            {m_audioPlayback->isChecked(), m_audioCapture->isChecked()}, &error)) {
+        refreshAudioOptions();
+        showError(QStringLiteral("Could not save audio settings"), error);
+    }
+}
+
 QString Window::selectedPath() const
 {
     const QString id = selectedId();
@@ -508,6 +557,7 @@ void Window::refreshProfiles(const QString& preferredId)
     m_empty->setVisible(m_list->count() == 0);
     m_list->setVisible(m_list->count() > 0);
     fitProfileList();
+    refreshAudioOptions();
     showIdlePrompt();
     updateControls();
 }
@@ -748,6 +798,14 @@ void Window::updateControls()
 {
     const bool active = m_session->active();
     const bool selected = !selectedId().isEmpty();
+    const bool audioEditable = selected && !active && !m_acquisition.active
+        && !m_closePending && m_restartPath.isEmpty() && !m_stopping;
+    m_audioPlayback->setEnabled(audioEditable);
+    m_audioCapture->setEnabled(audioEditable);
+    m_audioNote->setText(active
+        ? QStringLiteral("Disconnect to change audio settings; reconnect to apply.")
+        : selected ? QStringLiteral("Saved for this Cloud PC. Uses your default audio devices.")
+                   : QStringLiteral("Select a Cloud PC to configure audio."));
     m_connect->setEnabled(selected && !active && !m_acquisition.active && !m_closePending && m_restartPath.isEmpty());
     m_connect->setVisible(!active);
     m_disconnect->setEnabled(active && !m_stopping);
@@ -795,7 +853,7 @@ void Window::connectSelected()
     m_sessionLabel->setText(m_list->currentItem()->data(Qt::UserRole + 2).toString());
     m_sessionLabel->show();
     setStatus("connecting", QStringLiteral("Starting FreeRDP…"));
-    m_session->start(path);
+    m_session->start(path, audioForPath(path));
     updateControls();
 }
 
