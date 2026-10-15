@@ -45,3 +45,15 @@ Not yet checked: other tenants, Frontline and other editions, multi-monitor.
 - UI preference and Forget checked in an isolated omabox desktop (Omarchy 4.0.4-1, Hyprland 0.56.2, 1920×1080, scale 1, 0xleovision theme). The disposable keyring uses an empty password: this checks integration, not encryption at rest.
 
 Not yet checked for this feature: live Windows 365/FreeRDP/passkey reuse, tenant Conditional Access behavior, federated sign-in, or other Secret Service providers. The keyring provider controls encryption and unlocking. No credentials or real browser state were used in these checks.
+
+## Reconnect follow-up (October 15, 2026)
+
+The account owner reports full authentication even when reconnecting without quitting
+OmaWin365. Source inspection found that the connected handler closes the last sign-in
+window, which the existing retained-window code already documents as clearing Chromium
+session cookies. The new opt-in path retains eligible session cookies in app-lifetime
+memory and restores them on subsequent flows, while keyring encoding remains persistent
+only. Known persistent authentication cookies are distinguished from other saved cookies
+in the UI. This follow-up was compiled; the test results above predate it, and live
+reconnect behavior after this change remains unconfirmed. Reuse across app restarts
+without persistent Microsoft authentication cookies remains unresolved.

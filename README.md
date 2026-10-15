@@ -27,6 +27,13 @@ Conditional Access policy, cookie expiration and revocation still apply; Microso
 can require your passkey again. Federated identity providers may require their own
 sign-in because their cookies are not saved.
 
+While remembering is enabled, eligible Microsoft session cookies are also kept in
+application memory after successful sign-in and restored for subsequent connections.
+This keeps closing the sign-in window from discarding the current app session.
+These session cookies are never written to the keyring and disappear when OmaWin365
+exits or you choose Forget. Reuse after restarting the app still requires Microsoft
+to issue persistent authentication cookies; the local checkbox cannot enable that.
+
 **Forget Microsoft sign-in**, or turning remembering off, deletes the saved item and
 closes the private sign-in browser. These controls are available while disconnected.
 This only clears OMAWIN365's local sign-in state; it does not revoke Microsoft sessions
@@ -35,8 +42,10 @@ the keyring and retry. If the keyring is missing or locked and cannot be opened,
 continues normally without a plaintext cache fallback.
 
 The text below the checkbox reports whether cookies were found, restored, saved,
-or absent after sign-in. A successful keyring write containing no eligible persistent
-cookies is reported as empty, rather than as a remembered sign-in. Saved cookies
+or absent after sign-in. A keyring write without a known persistent authentication cookie
+(`ESTSAUTHPERSISTENT` or `estsStatePersistent`) is reported separately from a saved
+persistent authentication cookie. Saving tracking cookies is not reported as saved
+authentication. Saved cookies
 alone do not guarantee that Microsoft will accept a subsequent sign-in silently.
 The optional `--diagnose-auth` log also records fixed cache outcome labels, without
 cookie values, names, URLs or account identifiers.
@@ -44,7 +53,7 @@ cookie values, names, URLs or account identifiers.
 FreeRDP still obtains fresh connection tokens using its existing OAuth flow. OMAWIN365
 saves only unexpired, secure, persistent cookies for `login.microsoftonline.com`;
 session-only cookies, passwords, PINs, passkeys, OAuth tokens and entire browser profiles are
-not saved. The live Chromium profile, cache and temporary files remain in private tmpfs
+not saved to the keyring. The live Chromium profile, cache and temporary files remain in private tmpfs
 storage. Keyring protection and unlock behavior depend on your Secret Service provider;
 applications running as your user may be able to access an unlocked keyring.
 

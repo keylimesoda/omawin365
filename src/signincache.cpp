@@ -26,9 +26,8 @@ bool clean(const QString& value, qsizetype max)
         if (c.unicode() < 0x20 || c.unicode() == 0x7f) return false;
     return true;
 }
-}
 
-QJsonArray SignInCookies::persistent(const QJsonArray& cookies, double now)
+QJsonArray validated(const QJsonArray& cookies, double now, bool includeSession)
 {
     QJsonArray result;
     if (cookies.size() > MaxCookies || !std::isfinite(now)) return result;
@@ -41,17 +40,20 @@ QJsonArray SignInCookies::persistent(const QJsonArray& cookies, double now)
         const QString contents = cookie.value("value").toString();
         const QString path = cookie.value("path").toString();
         const double expires = cookie.value("expires").toDouble(-1);
+        // Canonical session cookies omit expires, as required by Storage.setCookies.
+        const bool session = cookie.value("session").toBool(false) || !cookie.contains("expires");
         if ((domain != "login.microsoftonline.com" && domain != ".login.microsoftonline.com")
             || !cookie.value("secure").isBool() || !cookie.value("secure").toBool()
-            || cookie.value("session").toBool(false) || cookie.contains("partitionKey")
+            || (session && !includeSession) || cookie.contains("partitionKey")
             || cookie.value("partitionKeyOpaque").toBool(false)
-            || !cookie.value("expires").isDouble() || !std::isfinite(expires) || expires <= now
+            || (!session && (!cookie.value("expires").isDouble() || !std::isfinite(expires) || expires <= now))
             || !namePattern.match(name).hasMatch() || !cookie.value("value").isString()
             || !clean(contents, 16384) || contents.contains(';')
             || !path.startsWith('/') || !clean(path, 2048)
             || !cookie.value("httpOnly").isBool()) continue;
         QJsonObject saved{{"name", name}, {"value", contents}, {"domain", domain},
-            {"path", path}, {"secure", true}, {"httpOnly", cookie.value("httpOnly")}, {"expires", expires}};
+            {"path", path}, {"secure", true}, {"httpOnly", cookie.value("httpOnly")}};
+        if (!session) saved.insert("expires", expires);
         if (cookie.contains("sameSite")) {
             const QString sameSite = cookie.value("sameSite").toString();
             if (sameSite != "Strict" && sameSite != "Lax" && sameSite != "None") continue;
@@ -61,6 +63,20 @@ QJsonArray SignInCookies::persistent(const QJsonArray& cookies, double now)
     }
     if (QJsonDocument(result).toJson(QJsonDocument::Compact).size() > MaxBytes) return {};
     return result;
+}
+}
+
+namespace SignInCookies {
+QJsonArray persistent(const QJsonArray& cookies, double now) { return validated(cookies, now, false); }
+QJsonArray forSession(const QJsonArray& cookies, double now) { return validated(cookies, now, true); }
+bool hasPersistentAuthentication(const QJsonArray& cookies)
+{
+    for (const auto& cookie : cookies) {
+        const auto name = cookie.toObject().value("name").toString();
+        if (name == "ESTSAUTHPERSISTENT" || name == "estsStatePersistent") return true;
+    }
+    return false;
+}
 }
 
 QByteArray SignInCookies::encode(const QJsonArray& cookies, double now)
@@ -160,8 +176,8 @@ void SignInCache::next()
         finished->deleteLater();
         if (job.kind == Kind::Load) emit loaded(result->data, result->ok);
         else if (job.kind == Kind::Save) {
-            const bool hasCookies = !QJsonDocument::fromJson(job.data).object().value("cookies").toArray().isEmpty();
-            emit saved(result->ok, hasCookies);
+            const auto cookies = QJsonDocument::fromJson(job.data).object().value("cookies").toArray();
+            emit saved(result->ok, SignInCookies::hasPersistentAuthentication(cookies));
         }
         else emit cleared(result->ok);
         next();

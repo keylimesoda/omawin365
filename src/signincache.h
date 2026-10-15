@@ -12,6 +12,10 @@ namespace SignInCookies {
 // Only persistent, secure cookies for the exact Entra sign-in host; no OAuth tokens,
 // session-only cookies, portal storage, arbitrary IdP state or browser profiles.
 QJsonArray persistent(const QJsonArray& cookies, double now);
+// For app-lifetime memory only. Session cookies keep their session semantics:
+// expires is omitted, never invented or extended. Never serialize this list directly.
+QJsonArray forSession(const QJsonArray& cookies, double now);
+bool hasPersistentAuthentication(const QJsonArray& cookies);
 QByteArray encode(const QJsonArray& cookies, double now);
 QJsonArray decode(const QByteArray& data, double now);
 }
@@ -28,7 +32,7 @@ public:
     void clear();
 signals:
     void loaded(const QByteArray& data, bool ok);
-    void saved(bool ok, bool hasPersistentCookies);
+    void saved(bool ok, bool hasPersistentAuthentication);
     void cleared(bool ok);
 private:
     enum class Kind { Load, Save, Clear };

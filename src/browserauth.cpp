@@ -306,6 +306,7 @@ struct BrowserAuth::Private {
 
     BrowserAuth* owner;
     SignInCache cache;
+    QJsonArray liveSignInCookies; // App-lifetime memory only, including session cookies.
     bool rememberSignIn = false;
     bool loadingCache = false;
     bool finishingAuth = false;
@@ -370,15 +371,15 @@ struct BrowserAuth::Private {
                     : QStringLiteral("Microsoft sign-in cookies loaded from the system keyring. Restoring them in the private browser…"));
             if (active && round == loadedRound && process.state() == QProcess::NotRunning) startBrowser(true);
         });
-        QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok, bool hasPersistentCookies) {
+        QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok, bool hasPersistentAuthentication) {
             if (!rememberSignIn) return;
-            diagnostic(!ok ? QStringLiteral("sign-in-cache-save-failed") : hasPersistentCookies
+            diagnostic(!ok ? QStringLiteral("sign-in-cache-save-failed") : hasPersistentAuthentication
                 ? QStringLiteral("sign-in-cache-save-ready") : QStringLiteral("sign-in-cache-save-empty"));
             emit owner->signInCacheNotice(!ok
                 ? QStringLiteral("Microsoft sign-in could not be saved in the system keyring. You may need to sign in again.")
-                : hasPersistentCookies
-                    ? QStringLiteral("Microsoft sign-in cookies saved in the system keyring. Microsoft may still require authentication.")
-                    : QStringLiteral("Microsoft supplied no eligible persistent sign-in cookies. There is no reusable sign-in saved. Choose ‘Stay signed in’ if offered; your organization's policy may prevent persistence."));
+                : hasPersistentAuthentication
+                    ? QStringLiteral("Persistent Microsoft authentication cookies saved in the system keyring. Microsoft may still require authentication.")
+                    : QStringLiteral("No known persistent Microsoft authentication cookie was saved. Eligible session cookies are kept in memory while OmaWin365 stays open; Microsoft may still require authentication."));
         });
         QObject::connect(&cache, &SignInCache::cleared, owner, [this](bool ok) {
             emit owner->signInForgotten(ok);
@@ -673,6 +674,13 @@ struct BrowserAuth::Private {
         if (!QFileInfo(executable).isExecutable()) {
             failRound(QStringLiteral("Chromium is required for Microsoft sign-in. Install the Chromium package."));
             return;
+        }
+        if (rememberSignIn && !cacheReady && !liveSignInCookies.isEmpty()) {
+            // Chromium can exit after its last window closes. Preserve only the
+            // current app session in memory; do not promote session cookies to disk.
+            liveSignInCookies = SignInCookies::forSession(liveSignInCookies, QDateTime::currentSecsSinceEpoch());
+            restoreCookies = liveSignInCookies;
+            cacheReady = !restoreCookies.isEmpty();
         }
         if (rememberSignIn && !cacheReady) {
             if (!loadingCache) {
@@ -1004,14 +1012,14 @@ struct BrowserAuth::Private {
     void prepareFlow()
     {
         if (rememberSignIn && !restoreCookies.isEmpty()) {
-            const auto cookies = std::exchange(restoreCookies, QJsonArray{});
+            const auto cookies = SignInCookies::forSession(std::exchange(restoreCookies, QJsonArray{}), QDateTime::currentSecsSinceEpoch());
             send(QStringLiteral("Storage.setCookies"), {{QStringLiteral("cookies"), cookies}}, {},
                 [this, restoreRound = round](const QJsonObject& result) {
                     const bool failed = result.value(QStringLiteral("omawin365CookieCommandFailed")).toBool();
                     diagnostic(failed ? QStringLiteral("sign-in-cache-restore-failed") : QStringLiteral("sign-in-cache-restore-ready"));
                     emit owner->signInCacheNotice(failed
                         ? QStringLiteral("The private browser could not restore saved Microsoft sign-in cookies. You may need to sign in again.")
-                        : QStringLiteral("Saved Microsoft sign-in cookies restored. Microsoft decides whether authentication is required."));
+                        : QStringLiteral("Microsoft sign-in cookies restored. Microsoft decides whether authentication is required."));
                     if (active && round == restoreRound) prepareFlow();
                 });
             return;
@@ -1369,9 +1377,15 @@ struct BrowserAuth::Private {
         if (!rememberSignIn) { complete(); return; }
         const quint64 snapshotRound = round;
         send(QStringLiteral("Storage.getCookies"), {}, {}, [this, snapshotRound, complete = std::move(complete)](const QJsonObject& result) {
-            if (rememberSignIn && result.value(QStringLiteral("cookies")).isArray())
-                cache.save(SignInCookies::encode(result.value(QStringLiteral("cookies")).toArray(), QDateTime::currentSecsSinceEpoch()));
-            else
+            if (rememberSignIn && result.value(QStringLiteral("cookies")).isArray()) {
+                const auto cookies = result.value(QStringLiteral("cookies")).toArray();
+                const auto now = QDateTime::currentSecsSinceEpoch();
+                liveSignInCookies = SignInCookies::forSession(cookies, now);
+                // Closing the last Chromium window clears session cookies even
+                // when the process stays alive. Restore before the next flow.
+                restoreCookies = liveSignInCookies;
+                cache.save(SignInCookies::encode(cookies, now));
+            } else
                 emit owner->signInCacheNotice(QStringLiteral("Microsoft sign-in could not be remembered. You may need to sign in again."));
             if (active && round == snapshotRound) complete();
         });
@@ -1566,6 +1580,7 @@ void BrowserAuth::setRememberSignIn(bool enabled)
     d->rememberSignIn = enabled;
     if (!enabled) {
         d->restoreCookies = {};
+        d->liveSignInCookies = {};
         // Forget can drop a queued load before it produces a loaded signal.
         d->loadingCache = false;
     }
