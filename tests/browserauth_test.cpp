@@ -18,6 +18,8 @@ extern "C" int kill(pid_t pid, int signal) noexcept
     return int(syscall(SYS_kill, pid, signal));
 }
 
+namespace { QUrl syntheticAuthorization(const QString& state); }
+
 struct BrowserAuthTestAccess {
     static void useSyntheticBrowser(BrowserAuth& browser, const QString& scenario, const QString& trace)
     {
@@ -52,6 +54,50 @@ struct BrowserAuthTestAccess {
             state.active = true;
             state.rememberSignIn = true;
         };
+        for (const bool callbackSeen : {true, false}) {
+            for (const QString error : {QStringLiteral("net::ERR_ABORTED"), QStringLiteral("net::ERR_NAME_NOT_RESOLVED")}) {
+                BrowserAuth browser;
+                prepare(browser);
+                auto& state = *browser.d;
+                const auto authorization = syntheticAuthorization(QString(64, 'a'));
+                state.auth = {authorization, OAuthContract::request(authorization)};
+                state.auth.contract->generation = 17;
+                state.target = "owned-target";
+                state.pages.insert(state.target, {state.round, "owned-session", "owned-frame", {}, false});
+                int callbacks = 0, failures = 0;
+                QObject::connect(&browser, &BrowserAuth::callbackReady, [&](const OAuthContract::Callback& result) {
+                    ++callbacks;
+                    check(result.generation == 17, "cookie snapshot preserves the callback generation");
+                });
+                QObject::connect(&browser, &BrowserAuth::failed, [&] { ++failures; });
+                const int resume = state.nextId;
+                state.resumePage(state.target, "owned-session");
+                const int navigation = state.nextId;
+                state.handleMessage({{"id", resume}, {"result", QJsonObject{}}});
+                int snapshot = -1;
+                if (callbackSeen) {
+                    state.handleMessage({{"method", "Fetch.requestPaused"}, {"sessionId", "owned-session"},
+                        {"params", QJsonObject{{"requestId", "callback-request"}, {"resourceType", "Document"},
+                            {"frameId", "owned-frame"}, {"request", QJsonObject{{"method", "GET"},
+                                {"url", "https://login.microsoftonline.com/common/oauth2/nativeclient?code=fictional-code&state=" + QString(64, 'a')}}}}}});
+                    for (auto it = state.pending.cbegin(); it != state.pending.cend(); ++it)
+                        if (it->method == "Storage.getCookies") snapshot = it.key();
+                    check(snapshot >= 0 && state.finishingAuth && callbacks == 0,
+                          "validated callback waits for the optional cookie snapshot");
+                }
+                // Chromium acknowledges the initial navigation after the Fetch abort,
+                // while the asynchronous cookie read still keeps this round active.
+                state.handleMessage({{"id", navigation}, {"result", QJsonObject{{"errorText", error}}}});
+                if (callbackSeen && error == "net::ERR_ABORTED") {
+                    state.handleMessage({{"id", snapshot}, {"error", QJsonObject{{"code", -1}}}});
+                    check(callbacks == 1 && failures == 0 && !state.active,
+                          "our callback interception abort is not a network failure while snapshotting cookies");
+                } else {
+                    check(callbacks == 0 && failures == 1 && !state.active,
+                          "real navigation failures and aborts without a validated callback still stop sign-in");
+                }
+            }
+        }
         {
             BrowserAuth browser;
             prepare(browser);
@@ -490,6 +536,11 @@ int main(int argc, char** argv)
             std::fprintf(stderr, "FAIL: %s\n", name);
         }
     };
+    if (application.arguments().contains(QStringLiteral("--cache-only"))) {
+        BrowserAuthTestAccess::signInCache(check);
+        std::printf("Browser cache assertions: %d; failures: %d.\n", assertions, failures);
+        return failures ? 1 : 0;
+    }
     QUrl request(QStringLiteral("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("client_id"), QStringLiteral("a85cf173-4192-42f8-81fa-777a763e6e2c"));

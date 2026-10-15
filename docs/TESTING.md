@@ -35,3 +35,9 @@ owner and must not put real cookies or tokens into fixtures or evidence.
 The retained-browser handoff fixture uses a small nonblocking pipe and drains queued
 frames while collecting commands. This matches the production write behavior and
 keeps the test independent of the host's per-user pipe capacity quota.
+
+Run only the cookie-cache boundary checks with
+`.build-tests/browser/browserauth_test --cache-only` after building that target.
+They include Chromium's late `net::ERR_ABORTED` navigation acknowledgement after
+intercepting a validated OAuth callback while cookie capture is pending. Unvalidated
+aborts and other navigation errors must still stop sign-in.

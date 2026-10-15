@@ -1156,8 +1156,14 @@ struct BrowserAuth::Private {
                 : auth.authorization.toString(QUrl::FullyEncoded);
             send(QStringLiteral("Page.navigate"), {{QStringLiteral("url"), url}}, session,
                  [this](const QJsonObject& navigation) {
-                if (!navigation.value(QStringLiteral("errorText")).toString().isEmpty())
-                    failRound(QStringLiteral("The Microsoft page could not be opened. Check the network connection."));
+                const QString error = navigation.value(QStringLiteral("errorText")).toString();
+                if (error.isEmpty()) return;
+                // Intercepting a validated nativeclient callback deliberately aborts
+                // this navigation. Cookie capture keeps the round active until its
+                // reply, so the late abort acknowledgement is expected here.
+                if (mode == Mode::Authentication && finishingAuth
+                    && error == QStringLiteral("net::ERR_ABORTED")) return;
+                failRound(QStringLiteral("The Microsoft page could not be opened. Check the network connection."));
             });
             if (active)
                 emit owner->status(mode == Mode::Acquisition
