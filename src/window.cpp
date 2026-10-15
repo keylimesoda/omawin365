@@ -172,7 +172,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_rememberSignIn->setChecked(QSettings().value(QStringLiteral("rememberSignIn"), false).toBool());
     m_browser->setRememberSignIn(m_rememberSignIn->isChecked());
     m_contentLayout->addWidget(rememberRow);
-    m_signInCacheNote = label(QStringLiteral("Uses your system keyring. Choose ‘Stay signed in’ at Microsoft if offered. Your organization may still require your passkey."), content, "muted");
+    m_signInCacheNote = label(QStringLiteral("Remembers sign-in while this app is open. Uses your system keyring for longer reuse when Microsoft allows it. Microsoft may still require your passkey."), content, "muted");
     m_signInCacheNote->setObjectName(QStringLiteral("signInCacheNote"));
     m_contentLayout->addWidget(m_signInCacheNote);
     m_forgetSignIn = new WrappedButton(QStringLiteral("&Forget Microsoft sign-in"), content);
@@ -193,7 +193,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
         if (!enabled) { forgetSignIn(); return; }
         QSettings().setValue(QStringLiteral("rememberSignIn"), true);
         m_browser->setRememberSignIn(true);
-        m_signInCacheNote->setText(QStringLiteral("Uses your system keyring. Choose ‘Stay signed in’ at Microsoft if offered. Your organization may still require your passkey."));
+        m_signInCacheNote->setText(QStringLiteral("Remembers sign-in while this app is open. Uses your system keyring for longer reuse when Microsoft allows it. Microsoft may still require your passkey."));
     });
     connect(m_forgetSignIn, &QPushButton::clicked, this, forgetSignIn);
     connect(m_browser, &BrowserAuth::signInCacheNotice, m_signInCacheNote, &QLabel::setText);

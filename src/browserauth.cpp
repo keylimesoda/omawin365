@@ -365,10 +365,10 @@ struct BrowserAuth::Private {
             diagnostic(!ok ? QStringLiteral("sign-in-cache-load-failed") : restoreCookies.isEmpty()
                 ? QStringLiteral("sign-in-cache-load-empty") : QStringLiteral("sign-in-cache-load-ready"));
             emit owner->signInCacheNotice(!ok
-                ? QStringLiteral("The system keyring could not be opened. Sign in normally; no unprotected cache will be used.")
+                ? QStringLiteral("Could not open the system keyring. Please sign in again.")
                 : restoreCookies.isEmpty()
-                    ? QStringLiteral("No unexpired Microsoft sign-in cookies were found in the system keyring. Sign in and choose ‘Stay signed in’ if offered.")
-                    : QStringLiteral("Microsoft sign-in cookies loaded from the system keyring. Restoring them in the private browser…"));
+                    ? QStringLiteral("Sign in to remember this session.")
+                    : QStringLiteral("Restoring saved sign-in…"));
             if (active && round == loadedRound && process.state() == QProcess::NotRunning) startBrowser(true);
         });
         QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok, bool hasPersistentAuthentication) {
@@ -376,10 +376,12 @@ struct BrowserAuth::Private {
             diagnostic(!ok ? QStringLiteral("sign-in-cache-save-failed") : hasPersistentAuthentication
                 ? QStringLiteral("sign-in-cache-save-ready") : QStringLiteral("sign-in-cache-save-empty"));
             emit owner->signInCacheNotice(!ok
-                ? QStringLiteral("Microsoft sign-in could not be saved in the system keyring. You may need to sign in again.")
+                ? QStringLiteral("Could not save sign-in in the system keyring. You may need to sign in again.")
                 : hasPersistentAuthentication
-                    ? QStringLiteral("Persistent Microsoft authentication cookies saved in the system keyring. Microsoft may still require authentication.")
-                    : QStringLiteral("No known persistent Microsoft authentication cookie was saved. Eligible session cookies are kept in memory while OmaWin365 stays open; Microsoft may still require authentication."));
+                    ? QStringLiteral("Sign-in saved securely. Microsoft may still ask you to authenticate.")
+                    : !liveSignInCookies.isEmpty()
+                        ? QStringLiteral("Sign-in remembered until you close OmaWin365. Microsoft may still ask you to authenticate.")
+                        : QStringLiteral("Sign-in could not be remembered. You will need to sign in again."));
         });
         QObject::connect(&cache, &SignInCache::cleared, owner, [this](bool ok) {
             emit owner->signInForgotten(ok);
@@ -1018,8 +1020,8 @@ struct BrowserAuth::Private {
                     const bool failed = result.value(QStringLiteral("omawin365CookieCommandFailed")).toBool();
                     diagnostic(failed ? QStringLiteral("sign-in-cache-restore-failed") : QStringLiteral("sign-in-cache-restore-ready"));
                     emit owner->signInCacheNotice(failed
-                        ? QStringLiteral("The private browser could not restore saved Microsoft sign-in cookies. You may need to sign in again.")
-                        : QStringLiteral("Microsoft sign-in cookies restored. Microsoft decides whether authentication is required."));
+                        ? QStringLiteral("Could not restore saved sign-in. Please sign in again.")
+                        : QStringLiteral("Saved sign-in restored. Microsoft may still ask you to authenticate."));
                     if (active && round == restoreRound) prepareFlow();
                 });
             return;

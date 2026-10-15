@@ -41,12 +41,10 @@ or sign you out of other applications. A deletion failure is shown so you can un
 the keyring and retry. If the keyring is missing or locked and cannot be opened, sign-in
 continues normally without a plaintext cache fallback.
 
-The text below the checkbox reports whether cookies were found, restored, saved,
-or absent after sign-in. A keyring write without a known persistent authentication cookie
-(`ESTSAUTHPERSISTENT` or `estsStatePersistent`) is reported separately from a saved
-persistent authentication cookie. Saving tracking cookies is not reported as saved
-authentication. Saved cookies
-alone do not guarantee that Microsoft will accept a subsequent sign-in silently.
+The text below the checkbox reports whether sign-in was saved securely, remembered
+only until the app closes, or could not be remembered. A successful keyring write
+containing only other Microsoft cookies is not presented as saved authentication.
+Microsoft still decides whether to accept restored sign-in state.
 The optional `--diagnose-auth` log also records fixed cache outcome labels, without
 cookie values, names, URLs or account identifiers.
 
