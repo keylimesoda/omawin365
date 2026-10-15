@@ -10,10 +10,10 @@ Session::Session(QObject* parent) : QObject(parent), state_(std::make_unique<Sta
 Session::~Session() = default;
 bool Session::active() const { return controls.active; }
 void Session::setDiagnosticsEnabled(bool) {}
-void Session::start(const QString& path, AudioOptions audio)
+void Session::start(const QString& path, const LaunchOptions& options)
 {
     controls.starts.append(path);
-    controls.audioStarts.append(audio);
+    controls.options.append(options);
     controls.active = true;
     emit statusChanged("connecting", "Synthetic transport starting");
 }

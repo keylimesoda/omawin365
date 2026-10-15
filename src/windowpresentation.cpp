@@ -31,7 +31,7 @@ namespace WindowPresentation {
 // untouched. QImageReader uses Qt's runtime SVG plugin without a QtSvg link.
 class BrandLogo final : public QLabel {
 public:
-    explicit BrandLogo(QWidget* parent, qreal scale = 1.0) : QLabel(parent), m_scale(scale)
+    explicit BrandLogo(QWidget* parent) : QLabel(parent)
     {
         QSizePolicy policy(QSizePolicy::Maximum, QSizePolicy::Maximum);
         policy.setHeightForWidth(true);
@@ -57,9 +57,10 @@ public:
     }
     QSize minimumSizeHint() const override { return QSize(0, 0); }
 
+    // One size in the launcher and About; narrower windows shrink it via heightForWidth.
     int preferredWidth() const
     {
-        return qRound(qMin(240, QFontMetrics(font()).lineSpacing() * 12) * m_scale);
+        return qMin(320, QFontMetrics(font()).lineSpacing() * 16);
     }
     void refresh()
     {
@@ -101,7 +102,6 @@ protected:
         return result;
     }
 private:
-    const qreal m_scale;
     QByteArray m_svg;
     QByteArray m_coloredSvg;
     QColor m_textColor;
@@ -109,7 +109,7 @@ private:
     qreal m_renderDpr = 0;
 };
 
-BrandingHeader::BrandingHeader(Theme* theme, QWidget* parent, qreal logoScale) : QWidget(parent), m_theme(theme)
+BrandingHeader::BrandingHeader(Theme* theme, QWidget* parent) : QWidget(parent), m_theme(theme)
 {
     QSizePolicy policy(QSizePolicy::Ignored, QSizePolicy::Minimum);
     policy.setHeightForWidth(true);
@@ -117,7 +117,7 @@ BrandingHeader::BrandingHeader(Theme* theme, QWidget* parent, qreal logoScale) :
     m_layout = new QHBoxLayout(this);
     m_layout->setContentsMargins(0, 0, 0, 0);
     m_layout->setSizeConstraint(QLayout::SetNoConstraint);
-    m_logo = new BrandLogo(this, logoScale);
+    m_logo = new BrandLogo(this);
     m_layout->addWidget(m_logo, 0, Qt::AlignLeft);
     m_layout->addStretch(1);
     connect(theme, &Theme::changed, this, [this] { updateLayout(); });
@@ -268,7 +268,8 @@ DialogLayout::DialogLayout(QDialog* dialog, Theme* theme)
     m_outer->setSpacing(0);
     m_outer->addWidget(m_scroll);
     dialog->installEventFilter(this);
-    connect(theme, &Theme::changed, this, [this] { applyTheme(); scheduleFit(); });
+    // A theme reload must not make an open dialog jump sideways.
+    connect(theme, &Theme::changed, this, [this] { applyTheme(); scheduleFit(m_dialog->isVisible()); });
     applyTheme();
 }
 
@@ -339,11 +340,12 @@ void DialogLayout::applyTheme()
     layoutSpacing(controls, m_theme->spacing(QStringLiteral("control-gap"), 8));
 }
 
-void DialogLayout::scheduleFit()
+void DialogLayout::scheduleFit(bool preserveWidth)
 {
+    m_fitPreserveWidth = m_fitPending ? m_fitPreserveWidth && preserveWidth : preserveWidth;
     if (m_fitPending) return;
     m_fitPending = true;
-    QTimer::singleShot(0, this, [this] { m_fitPending = false; fit(); });
+    QTimer::singleShot(0, this, [this] { m_fitPending = false; fit(m_fitPreserveWidth); });
 }
 
 QLabel* label(const QString& text, QWidget* parent, const char* role)
@@ -391,12 +393,6 @@ void themeMessageBox(QMessageBox* box, Theme* theme)
     QObject::connect(theme, &Theme::changed, box, clearButtonIcons);
     layout->controls->addWidget(buttons);
     layout->fit();
-}
-
-void refit(QDialog* prompt)
-{
-    if (auto* layout = prompt->findChild<QObject*>(QStringLiteral("adaptiveDialogLayout")))
-        static_cast<DialogLayout*>(layout)->fit(true);
 }
 
 bool confirmProfileAction(QMessageBox& confirm, Theme* theme,

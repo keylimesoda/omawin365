@@ -1,14 +1,16 @@
 #include "window.h"
 #include "windowpresentation.h"
 #include "browserauth.h"
+#include "displayscale.h"
 #include "profilestore.h"
 #include "session.h"
 #include "theme.h"
 
 #include <QApplication>
 #include <QBoxLayout>
-#include <QCloseEvent>
 #include <QCheckBox>
+#include <QCloseEvent>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QEvent>
@@ -28,6 +30,7 @@
 #include <QShortcut>
 #include <QStyle>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QValidator>
@@ -138,21 +141,52 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_statusLayout->addWidget(m_detailLabel);
     m_statusLayout->addWidget(m_progressNote);
 
-    m_contentLayout->addWidget(label(QStringLiteral("Audio"), content, "title"));
+    // Session settings: what the selected Cloud PC may use, saved per PC, and
+    // the app-wide display scale. Captured at Connect or Reconnect.
+    m_contentLayout->addWidget(label(QStringLiteral("Session settings"), content, "title"));
+    auto* scaleRow = new QHBoxLayout;
+    auto* scaleLabel = label(QStringLiteral("Display &scale"), content);
+    m_scale = new QComboBox(content);
+    m_scale->setAccessibleName(QStringLiteral("Remote desktop scale"));
+    m_scale->setToolTip(QStringLiteral("Windows text and icon size in the remote desktop, for every Cloud PC. Auto follows the focused monitor's Omarchy scale."));
+    m_scale->addItem(QStringLiteral("Auto"), DisplayScale::Auto);
+    for (int percent : DisplayScale::presets())
+        m_scale->addItem(QStringLiteral("%1%").arg(percent), percent);
+    scaleLabel->setBuddy(m_scale);
+    scaleRow->addWidget(scaleLabel, 1, Qt::AlignVCenter);
+    scaleRow->addWidget(m_scale);
+    m_contentLayout->addLayout(scaleRow);
     m_audioPlayback = new QCheckBox(QStringLiteral("Play remote &audio"), content);
     m_audioPlayback->setObjectName(QStringLiteral("audioPlayback"));
     m_audioPlayback->setToolTip(QStringLiteral("Play Windows sound through your default local speakers or headphones."));
     m_audioCapture = new QCheckBox(QStringLiteral("Forward &microphone"), content);
     m_audioCapture->setObjectName(QStringLiteral("audioCapture"));
     m_audioCapture->setToolTip(QStringLiteral("Allow this Cloud PC to receive audio from your default local microphone."));
-    for (auto* option : {m_audioPlayback, m_audioCapture}) {
+    m_clipboard = new QCheckBox(QStringLiteral("Share c&lipboard"), content);
+    m_clipboard->setAccessibleName(QStringLiteral("Share clipboard"));
+    m_clipboard->setToolTip(QStringLiteral("Copy and paste text and images between this computer and the Cloud PC. Files are never shared."));
+    for (auto* option : {m_audioPlayback, m_audioCapture, m_clipboard}) {
         option->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_contentLayout->addWidget(option);
-        connect(option, &QCheckBox::toggled, this, &Window::saveAudioOptions);
+        connect(option, &QCheckBox::toggled, this, &Window::saveDeviceOptions);
     }
-    m_audioNote = label({}, content, "muted");
-    m_audioNote->setObjectName(QStringLiteral("audioNote"));
-    m_contentLayout->addWidget(m_audioNote);
+    m_devicesNote = label({}, content, "muted");
+    m_devicesNote->setObjectName(QStringLiteral("devicesNote"));
+    m_contentLayout->addWidget(m_devicesNote);
+    m_optionsPending = label(QStringLiteral("Reconnect to apply. Until then this session keeps its current settings, including the microphone."), content, "muted");
+    m_optionsPending->setObjectName(QStringLiteral("optionsPending"));
+    m_optionsPending->hide();
+    m_contentLayout->addWidget(m_optionsPending);
+    {
+        const int choice = DisplayScale::normalizeChoice(QSettings().value(QStringLiteral("remoteDesktop/scale")));
+        m_scale->setCurrentIndex(std::max(0, m_scale->findData(choice)));
+    }
+    refreshAutoScale();
+    connect(m_scale, &QComboBox::currentIndexChanged, this, [this] {
+        QSettings().setValue(QStringLiteral("remoteDesktop/scale"), DisplayScale::normalizeChoice(m_scale->currentData()));
+        refreshAutoScale();
+        updatePendingOptions();
+    });
 
     m_connect = new WrappedButton(QStringLiteral("&Connect"), content);
     m_connect->setProperty("primary", true);
@@ -164,6 +198,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     sessionActions->actions->addWidget(m_disconnect);
     sessionActions->actions->addWidget(m_reconnect);
     m_contentLayout->addWidget(sessionActions);
+
     m_contentLayout->addWidget(statusPanel);
     m_contentLayout->addWidget(profileActions);
     m_acquire = new WrappedButton(QStringLiteral("&Get a Cloud PC connection"), content);
@@ -172,7 +207,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     auto* signatureNotice = label(QStringLiteral("Connection file signatures are kept but not verified. Use files only from a source you trust."), content, "muted");
     signatureNotice->setObjectName(QStringLiteral("signatureNotice"));
     m_contentLayout->addWidget(signatureNotice);
-    m_contentLayout->addWidget(label(QStringLiteral("Your desktop opens in a separate FreeRDP window. Private Microsoft sign-in may appear several times; follow each prompt."), content, "muted"));
+    m_contentLayout->addWidget(label(QStringLiteral("Your desktop opens in a separate FreeRDP window; Ctrl+Alt+Enter toggles fullscreen. Private Microsoft sign-in may appear several times; follow each prompt."), content, "muted"));
     m_contentLayout->addWidget(label(QStringLiteral("Tested with Windows 365 Enterprise. Other editions are not yet verified."), content, "muted"));
     auto* about = new QPushButton(QStringLiteral("&About…"), content);
     about->setObjectName(QStringLiteral("aboutButton"));
@@ -186,7 +221,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     connect(m_profiles, &ProfileStore::changed, this, [this] { refreshProfiles(); });
     connect(m_list, &QListWidget::currentRowChanged, this, [this] {
         QSettings().setValue(QStringLiteral("selectedProfile"), selectedId());
-        refreshAudioOptions();
+        refreshDeviceOptions();
         showIdlePrompt();
         updateControls();
     });
@@ -315,7 +350,8 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
                 }
             }
             setStatus("connecting", QStringLiteral("Starting a new session…"));
-            m_session->start(path, audioForPath(path));
+            m_activeOptions = m_restartOptions;
+            m_session->start(path, m_restartOptions);
             updateControls();
         }
     });
@@ -378,7 +414,7 @@ void Window::showAbout()
     m_aboutDialog = prompt;
     auto* layout = new DialogLayout(prompt, m_theme);
     auto* content = layout->content();
-    layout->details->addWidget(new BrandingHeader(m_theme, content, 1.25));
+    layout->details->addWidget(new BrandingHeader(m_theme, content));
     // 0.1.0 is a release, 0.1.0-rc.2 a pre-release, anything with + a development build.
     const QString version = QCoreApplication::applicationVersion();
     const QString stage = version.contains(u'+') ? QStringLiteral(" · development build")
@@ -498,35 +534,38 @@ QString Window::selectedId() const
     return m_list->currentItem() ? m_list->currentItem()->data(Qt::UserRole).toString() : QString();
 }
 
-AudioOptions Window::audioForPath(const QString& path) const
+DeviceOptions Window::devicesForPath(const QString& path) const
 {
     for (const Profile& profile : m_profiles->profiles())
-        if (profile.path == path) return profile.audio;
+        if (profile.path == path) return profile.devices;
     return {};
 }
 
-void Window::refreshAudioOptions()
+void Window::refreshDeviceOptions()
 {
     const QSignalBlocker playbackBlocker(m_audioPlayback);
     const QSignalBlocker captureBlocker(m_audioCapture);
-    const auto audio = audioForPath(selectedPath());
-    m_audioPlayback->setChecked(audio.playback);
-    m_audioCapture->setChecked(audio.capture);
+    const QSignalBlocker clipboardBlocker(m_clipboard);
+    const auto devices = devicesForPath(selectedPath());
+    m_audioPlayback->setChecked(devices.audioPlayback);
+    m_audioCapture->setChecked(devices.audioCapture);
+    m_clipboard->setChecked(devices.clipboard);
 }
 
-void Window::saveAudioOptions()
+void Window::saveDeviceOptions()
 {
     // Ignore programmatic changes while controls are unavailable too.
-    if (!m_audioPlayback->isEnabled() || !m_audioCapture->isEnabled()) {
-        refreshAudioOptions();
+    if (!m_audioPlayback->isEnabled()) {
+        refreshDeviceOptions();
         return;
     }
     QString error;
-    if (!m_profiles->setAudioOptions(selectedId(),
-            {m_audioPlayback->isChecked(), m_audioCapture->isChecked()}, &error)) {
-        refreshAudioOptions();
-        showError(QStringLiteral("Could not save audio settings"), error);
+    if (!m_profiles->setDeviceOptions(selectedId(),
+            {m_audioPlayback->isChecked(), m_audioCapture->isChecked(), m_clipboard->isChecked()}, &error)) {
+        refreshDeviceOptions();
+        showError(QStringLiteral("Could not save session settings"), error);
     }
+    updatePendingOptions();
 }
 
 QString Window::selectedPath() const
@@ -557,7 +596,7 @@ void Window::refreshProfiles(const QString& preferredId)
     m_empty->setVisible(m_list->count() == 0);
     m_list->setVisible(m_list->count() > 0);
     fitProfileList();
-    refreshAudioOptions();
+    refreshDeviceOptions();
     showIdlePrompt();
     updateControls();
 }
@@ -798,14 +837,13 @@ void Window::updateControls()
 {
     const bool active = m_session->active();
     const bool selected = !selectedId().isEmpty();
-    const bool audioEditable = selected && !active && !m_acquisition.active
-        && !m_closePending && m_restartPath.isEmpty() && !m_stopping;
-    m_audioPlayback->setEnabled(audioEditable);
-    m_audioCapture->setEnabled(audioEditable);
-    m_audioNote->setText(active
-        ? QStringLiteral("Disconnect to change audio settings; reconnect to apply.")
-        : selected ? QStringLiteral("Saved for this Cloud PC. Uses your default audio devices.")
-                   : QStringLiteral("Select a Cloud PC to configure audio."));
+    // Editable during a session too: a change waits for Reconnect (updatePendingOptions).
+    const bool devicesEditable = selected && !m_acquisition.active && !m_closePending;
+    for (auto* option : {m_audioPlayback, m_audioCapture, m_clipboard})
+        option->setEnabled(devicesEditable);
+    m_devicesNote->setText(selected
+        ? QStringLiteral("Audio, microphone and clipboard are saved for this Cloud PC. Display scale applies to all.")
+        : QStringLiteral("Select a Cloud PC to change its audio, microphone and clipboard."));
     m_connect->setEnabled(selected && !active && !m_acquisition.active && !m_closePending && m_restartPath.isEmpty());
     m_connect->setVisible(!active);
     m_disconnect->setEnabled(active && !m_stopping);
@@ -824,6 +862,39 @@ void Window::updateControls()
     markConnectedProfile();
     m_import->setEnabled(!active && !m_acquisition.active && !m_closePending);
     m_acquire->setEnabled(!active && !m_acquisition.active && !m_closePending);
+    updatePendingOptions();
+}
+
+LaunchOptions Window::launchOptions(const QString& path) const
+{
+    LaunchOptions options;
+    const int choice = DisplayScale::normalizeChoice(m_scale->currentData());
+    options.desktopScale = choice == DisplayScale::Auto ? m_autoScale : choice;
+    options.devices = devicesForPath(path);
+    return options;
+}
+
+void Window::refreshAutoScale()
+{
+    if (DisplayScale::normalizeChoice(m_scale->currentData()) != DisplayScale::Auto) return;
+    m_autoScale = DisplayScale::resolveAuto(this);
+    m_scale->setItemText(0, QStringLiteral("Auto (%1%)").arg(m_autoScale));
+}
+
+void Window::updatePendingOptions()
+{
+    // Compares resolved values, so Auto on a differently scaled monitor is pending too.
+    m_optionsPending->setVisible(m_session->active() && !m_stopping && launchOptions(m_activeProfile) != m_activeOptions);
+}
+
+void Window::changeEvent(QEvent* event)
+{
+    // Focusing the launcher on another monitor re-reads Auto.
+    if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
+        refreshAutoScale();
+        updatePendingOptions();
+    }
+    QWidget::changeEvent(event);
 }
 
 void Window::setStatus(const QString& phase, const QString& detail)
@@ -853,7 +924,9 @@ void Window::connectSelected()
     m_sessionLabel->setText(m_list->currentItem()->data(Qt::UserRole + 2).toString());
     m_sessionLabel->show();
     setStatus("connecting", QStringLiteral("Starting FreeRDP…"));
-    m_session->start(path, audioForPath(path));
+    refreshAutoScale();
+    m_activeOptions = launchOptions(path);
+    m_session->start(path, m_activeOptions);
     updateControls();
 }
 
@@ -871,6 +944,9 @@ void Window::reconnectSession()
 {
     if (!m_session->active() || m_stopping || m_activeProfile.isEmpty()) return;
     m_restartPath = m_activeProfile;
+    // Capture now: the replacement starts later, after the old session has ended.
+    refreshAutoScale();
+    m_restartOptions = launchOptions(m_activeProfile);
     disconnectSession();
 }
 
@@ -894,7 +970,8 @@ bool Window::eventFilter(QObject* watched, QEvent* event)
         if (event->type() == QEvent::WindowDeactivate && m_challenge.pin) {
             m_challenge.pin->clear();
             m_challenge.pin->setEnabled(false);
-            if (m_challenge.focus && m_phase == "awaiting-pin") m_challenge.focus->show();
+            if (m_challenge.slot && m_challenge.focus && m_phase == "awaiting-pin")
+                m_challenge.slot->setCurrentWidget(m_challenge.focus);
             if (m_challenge.submit && m_phase == "awaiting-pin") m_challenge.submit->setEnabled(false);
         }
         QTimer::singleShot(0, this, &Window::updatePinFocus);
@@ -908,9 +985,9 @@ void Window::updatePinFocus()
     const bool active = m_challenge.dialog->isActiveWindow();
     m_challenge.pin->setEnabled(active);
     if (!active) m_challenge.pin->clear();
-    if (m_challenge.focus) m_challenge.focus->setVisible(!active);
+    if (m_challenge.slot && m_challenge.focus)
+        m_challenge.slot->setCurrentWidget(active ? static_cast<QWidget*>(m_challenge.pin) : m_challenge.focus);
     if (m_challenge.submit) m_challenge.submit->setEnabled(active && m_challenge.pin->hasAcceptableInput());
-    refit(m_challenge.dialog);
     if (active) m_challenge.pin->setFocus(Qt::OtherFocusReason);
 }
 
@@ -927,20 +1004,23 @@ void Window::requestPin(const QString& message)
     auto* content = layout->content();
     m_challenge.title = label(QStringLiteral("Security key PIN"), content, "title");
     layout->details->addWidget(m_challenge.title);
-    if (!message.isEmpty()) layout->details->addWidget(label(message, content));
-    m_challenge.detail = label(QStringLiteral("Enter the PIN for your local security key. It is sent privately to FreeRDP, not the browser. You will then need to touch the key."), content);
+    m_challenge.message = label(message, content);
+    m_challenge.message->setVisible(!message.isEmpty());
+    layout->details->addWidget(m_challenge.message);
+    m_challenge.detail = label(QStringLiteral("The PIN goes only to FreeRDP, never to the browser."), content, "muted");
     layout->details->addWidget(m_challenge.detail);
-    layout->details->addWidget(label(QStringLiteral("Cancel closes this desktop session: FreeRDP cannot safely cancel just this key request. No automatic PIN retry."), content, "muted"));
-    m_challenge.focus = new WrappedButton(QStringLiteral("Click here to enter your YubiKey PIN"), prompt);
-    layout->controls->addWidget(m_challenge.focus);
+    auto* pinLabel = label(QStringLiteral("&PIN"), prompt);
+    layout->controls->addWidget(pinLabel);
+    m_challenge.slot = new QStackedWidget(prompt);
+    m_challenge.slot->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    layout->controls->addWidget(m_challenge.slot);
+    m_challenge.focus = new QPushButton(QStringLiteral("Click to enter PIN"), m_challenge.slot);
+    m_challenge.slot->addWidget(m_challenge.focus);
     connect(m_challenge.focus, &QPushButton::clicked, prompt, [this, prompt] {
         attention(prompt);
         QTimer::singleShot(0, this, &Window::updatePinFocus);
     });
-    auto* pinLabel = label(QStringLiteral("&PIN"), prompt);
-    layout->controls->addWidget(pinLabel);
-    auto* input = new QLineEdit(prompt);
-    input->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    auto* input = new QLineEdit(m_challenge.slot);
     m_challenge.pin = input;
     input->installEventFilter(this);
     input->setEchoMode(QLineEdit::Password);
@@ -950,7 +1030,13 @@ void Window::requestPin(const QString& message)
     input->setValidator(new PinValidator(input));
     input->setEnabled(false);
     pinLabel->setBuddy(input);
-    layout->controls->addWidget(input);
+    m_challenge.slot->addWidget(input);
+    auto* sent = label(QStringLiteral("Sent once. Never retried automatically."), m_challenge.slot);
+    sent->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_challenge.sent = sent;
+    m_challenge.slot->addWidget(sent);
+    // QStackedLayout sizes to its tallest page, so no state change resizes the dialog.
+    m_challenge.slot->setCurrentWidget(m_challenge.focus);
     auto* cancel = new WrappedButton(QStringLiteral("Cancel and dis&connect"), prompt);
     m_challenge.submit = new WrappedButton(QStringLiteral("&Submit PIN"), prompt);
     m_challenge.submit->setProperty("primary", true);
@@ -1003,18 +1089,18 @@ void Window::showTouch()
 {
     if (!m_challenge.dialog || !m_challenge.pin || !m_challenge.submit) return;
     m_challenge.pin->clear();
-    m_challenge.pin->hide();
-    if (m_challenge.focus) m_challenge.focus->hide();
-    if (QWidget* buddy = m_challenge.pin->parentWidget()) {
-        for (QLabel* text : buddy->findChildren<QLabel*>())
-            if (text->buddy() == m_challenge.pin) text->hide();
-    }
+    m_challenge.pin->setEnabled(false);
+    if (m_challenge.slot && m_challenge.sent) m_challenge.slot->setCurrentWidget(m_challenge.sent);
+    // Same slot and no longer text than the PIN step: the dialog keeps its size.
     m_challenge.dialog->setWindowTitle(QStringLiteral("OMAWIN365 · touch your security key"));
     m_challenge.title->setText(QStringLiteral("Touch your security key"));
-    m_challenge.detail->setText(QStringLiteral("PIN submitted. Touch the physical key when it flashes. Check the remote app for success or failure: FreeRDP provides no reliable authentication-success event to OMAWIN365."));
+    if (m_challenge.message) {
+        m_challenge.message->setText(QStringLiteral("Touch the key when it flashes. The result appears in the Cloud PC."));
+        m_challenge.message->show();
+    }
+    m_challenge.detail->setText(QStringLiteral("OMAWIN365 cannot see whether sign-in succeeded."));
     m_challenge.submit->setText(QStringLiteral("&Done"));
     m_challenge.submit->setEnabled(true);
-    refit(m_challenge.dialog);
     m_challenge.submit->setFocus();
 }
 

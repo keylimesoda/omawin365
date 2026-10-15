@@ -18,7 +18,7 @@ class BrandLogo;
 
 class BrandingHeader final : public QWidget {
 public:
-    BrandingHeader(Theme* theme, QWidget* parent, qreal logoScale = 1.0);
+    BrandingHeader(Theme* theme, QWidget* parent);
 protected:
     void changeEvent(QEvent* event) override;
 private:
@@ -72,7 +72,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void applyTheme();
-    void scheduleFit();
+    void scheduleFit(bool preserveWidth = false);
     QDialog* m_dialog;
     Theme* m_theme;
     QVBoxLayout* m_outer;
@@ -80,12 +80,12 @@ private:
     WrappedContent* m_content;
     QVBoxLayout* m_flow;
     bool m_fitPending = false;
+    bool m_fitPreserveWidth = false;
 };
 
 QLabel* label(const QString& text, QWidget* parent, const char* role = nullptr);
 void layoutSpacing(QLayout* layout, int gap);
 void themeMessageBox(QMessageBox* box, Theme* theme);
-void refit(QDialog* prompt);
 // Caller retains the stack box through the subsequent profile operation.
 bool confirmProfileAction(QMessageBox& confirm, Theme* theme,
                           QMessageBox::StandardButton action, const QString& caption);

@@ -27,7 +27,7 @@ class SessionPublicTest : public QObject {
         // byte-exact publicRestrictedLaunchContract oracle.
         for (const auto& transport : fixture.events(QStringLiteral("transport"))) {
             const auto args = transport.value(QStringLiteral("argv")).toArray();
-            QCOMPARE(args.size(), 12);
+            QCOMPARE(args.size(), 14);
             for (const auto& arg : args) {
                 QVERIFY(!arg.toString().startsWith(QStringLiteral("/cert:")));
                 QVERIFY(!arg.toString().contains(QString::fromLatin1(fixtureFingerprint())));
@@ -1403,11 +1403,17 @@ private slots:
     {
         QTest::addColumn<QByteArray>("bytes");
         QTest::addColumn<bool>("saved");
-        QTest::newRow("minimal") << supportedProfile << false;
-        QTest::newRow("fuller-saved-utf8") << fullerProfile << true;
+        QTest::addColumn<int>("scale");
+        QTest::addColumn<bool>("clipboard");
+        QTest::addColumn<int>("sentScale");
+        QTest::newRow("minimal") << supportedProfile << false << 100 << true << 100;
+        QTest::newRow("fuller-saved-utf8") << fullerProfile << true << 150 << true << 150;
         QStringEncoder encoder(QStringConverter::Utf16LE, QStringConverter::Flag::WriteBom);
         const QByteArray utf16 = encoder.encode(QString::fromUtf8(fullerProfile));
-        QTest::newRow("fuller-saved-utf16le") << utf16 << true;
+        QTest::newRow("fuller-saved-utf16le") << utf16 << true << 175 << true << 175;
+        QTest::newRow("clipboard-off") << fullerProfile << false << 500 << false << 500;
+        QTest::newRow("scale-out-of-range") << supportedProfile << false << 501 << true << 100;
+        QTest::newRow("scale-negative") << supportedProfile << false << -150 << true << 100;
     }
     void audioLaunchOptions_data()
     {
@@ -1424,10 +1430,13 @@ private slots:
         QFETCH(bool, capture);
         SessionFixture fixture;
         QVERIFY(fixture.init());
-        fixture.session.start(fixture.profile(), {playback, capture});
+        LaunchOptions options;
+        options.devices.audioPlayback = playback;
+        options.devices.audioCapture = capture;
+        fixture.session.start(fixture.profile(), options);
         QTRY_COMPARE_WITH_TIMEOUT(fixture.events(QStringLiteral("terminal")).size(), 1, 3000);
         const auto args = fixture.events(QStringLiteral("transport")).first().value(QStringLiteral("argv")).toArray();
-        QCOMPARE(args.size(), 12);
+        QCOMPARE(args.size(), 14);
         const QString tune = args.last().toString();
         QVERIFY(tune.contains(QStringLiteral("FreeRDP_AudioPlayback:%1,").arg(playback ? "TRUE" : "FALSE")));
         QVERIFY(tune.contains(QStringLiteral("FreeRDP_AudioCapture:%1,").arg(capture ? "TRUE" : "FALSE")));
@@ -1451,6 +1460,9 @@ private slots:
     {
         QFETCH(QByteArray, bytes);
         QFETCH(bool, saved);
+        QFETCH(int, scale);
+        QFETCH(bool, clipboard);
+        QFETCH(int, sentScale);
         SessionFixture fixture;
         QVERIFY(fixture.init());
         QVERIFY(fixture.write(QStringLiteral("synthetic.rdp"), bytes));
@@ -1482,7 +1494,10 @@ private slots:
         fixture.environment("FREERDP_ASKPASS", "/fixture/askpass");
         fixture.environment("SSLKEYLOGFILE", "/fixture/tls-secret");
         fixture.environment("SESSION_FIXTURE_KEEP", "keep-unrelated");
-        fixture.session.start(launchPath);
+        LaunchOptions options;
+        options.desktopScale = scale;
+        options.devices.clipboard = clipboard;
+        fixture.session.start(launchPath, options);
         QTRY_COMPARE_WITH_TIMEOUT(fixture.events(QStringLiteral("terminal")).size(), 1, 3000);
         for (const auto& kind : {QStringLiteral("version"), QStringLiteral("transport")}) {
             const auto records = fixture.events(kind);
@@ -1498,7 +1513,7 @@ private slots:
         QCOMPARE(fixture.events(QStringLiteral("version")).front().value(QStringLiteral("argv")).toArray(),
             QJsonArray{QStringLiteral("/version")});
         const auto args = fixture.events(QStringLiteral("transport")).front().value(QStringLiteral("argv")).toArray();
-        QCOMPARE(args.size(), 12);
+        QCOMPARE(args.size(), 14);
         QCOMPARE(args.at(0).toString(), QFileInfo(launchPath).canonicalFilePath());
         const QStringList expected{QStringLiteral("+force-console-callbacks"), QStringLiteral("/gateway:type:arm"), QStringLiteral("/sec:aad"),
             QStringLiteral("/clipboard:files-to:off"), QStringLiteral("-auto-reconnect"),
@@ -1507,9 +1522,11 @@ private slots:
             QCOMPARE(args.at(index + 1).toString(), expected.at(index));
         QVERIFY(QRegularExpression(QStringLiteral("^/wm-class:omawin365-[0-9a-f-]{36}$")).match(args.at(7).toString()).hasMatch());
         QCOMPARE(args.at(8).toString(), QStringLiteral("/size:80%"));
-        QCOMPARE(args.at(9).toString(), QStringLiteral("/log-level:WARN"));
-        QCOMPARE(args.at(10).toString(), QStringLiteral("/log-filters:com.freerdp.client.x11:ERROR"));
-        const QString tune = args.at(11).toString();
+        QCOMPARE(args.at(9).toString(), QStringLiteral("/scale-desktop:%1").arg(sentScale));
+        QCOMPARE(args.at(10).toString(), QStringLiteral("/scale-device:100"));
+        QCOMPARE(args.at(11).toString(), QStringLiteral("/log-level:WARN"));
+        QCOMPARE(args.at(12).toString(), QStringLiteral("/log-filters:com.freerdp.client.x11:ERROR"));
+        const QString tune = args.at(13).toString();
         const QString policy = QStringLiteral(
             "/tune:FreeRDP_RedirectWebAuthN:TRUE,FreeRDP_AuthenticationLevel:2,"
             "FreeRDP_IgnoreCertificate:FALSE,FreeRDP_AutoAcceptCertificate:FALSE,"
@@ -1525,8 +1542,9 @@ private slots:
             "FreeRDP_AutoReconnectionEnabled:FALSE,FreeRDP_RemoteApplicationMode:FALSE,"
             "FreeRDP_DynamicResolutionUpdate:TRUE,FreeRDP_SupportDisplayControl:TRUE,"
             "FreeRDP_SmartSizing:FALSE,FreeRDP_ParentWindowId:0,FreeRDP_EmbeddedWindow:FALSE,"
-            "FreeRDP_Decorations:TRUE,FreeRDP_ToggleFullscreen:TRUE,"
-            "FreeRDP_ActionScript:,FreeRDP_ConfigPath:");
+            "FreeRDP_Decorations:TRUE,FreeRDP_ToggleFullscreen:TRUE,")
+            + (clipboard ? QString() : QStringLiteral("FreeRDP_RedirectClipboard:FALSE,"))
+            + QStringLiteral("FreeRDP_ActionScript:,FreeRDP_ConfigPath:");
         QVERIFY(tune.startsWith(policy));
         const QString config = tune.mid(policy.size());
         QVERIFY(QDir::isAbsolutePath(config));

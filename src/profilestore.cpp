@@ -125,9 +125,11 @@ void ProfileStore::loadIndex()
         const QString name = object.value(QStringLiteral("name")).toString();
         const auto playback = object.value(QStringLiteral("audioPlayback"));
         const auto capture = object.value(QStringLiteral("audioCapture"));
+        const auto clipboard = object.value(QStringLiteral("clipboard"));
         if ((!playback.isUndefined() && !playback.isBool())
-            || (!capture.isUndefined() && !capture.isBool())) {
-            initializationError_ = QStringLiteral("The saved profile list contains invalid audio settings; it was left unchanged.");
+            || (!capture.isUndefined() && !capture.isBool())
+            || (!clipboard.isUndefined() && !clipboard.isBool())) {
+            initializationError_ = QStringLiteral("The saved profile list contains invalid session settings; it was left unchanged.");
             return;
         }
         if (!profileId.match(id).hasMatch() || seen.contains(id) || name.isEmpty() || name.size() > 160) {
@@ -140,7 +142,7 @@ void ProfileStore::loadIndex()
             return;
         }
         seen.insert(id);
-        loaded.append({id, name, path, {playback.toBool(false), capture.toBool(false)}});
+        loaded.append({id, name, path, {playback.toBool(false), capture.toBool(false), clipboard.toBool(true)}});
     }
     profiles_ = std::move(loaded);
     index_ = bytes;
@@ -164,8 +166,9 @@ bool ProfileStore::saveIndex(const QList<Profile>& profiles, QString* error)
     QJsonArray array;
     for (const auto& profile : profiles)
         array.append(QJsonObject{{QStringLiteral("id"), profile.id}, {QStringLiteral("name"), profile.name},
-            {QStringLiteral("audioPlayback"), profile.audio.playback},
-            {QStringLiteral("audioCapture"), profile.audio.capture}});
+            {QStringLiteral("audioPlayback"), profile.devices.audioPlayback},
+            {QStringLiteral("audioCapture"), profile.devices.audioCapture},
+            {QStringLiteral("clipboard"), profile.devices.clipboard}});
     const QByteArray bytes = QJsonDocument(array).toJson(QJsonDocument::Compact);
     if (!atomicPrivateWrite(path, bytes, error))
         return false;
@@ -246,7 +249,7 @@ bool ProfileStore::renameProfile(const QString& id, const QString& name, QString
     return true;
 }
 
-bool ProfileStore::setAudioOptions(const QString& id, AudioOptions audio, QString* error)
+bool ProfileStore::setDeviceOptions(const QString& id, DeviceOptions devices, QString* error)
 {
     if (error)
         error->clear();
@@ -259,10 +262,10 @@ bool ProfileStore::setAudioOptions(const QString& id, AudioOptions audio, QStrin
         return fail(error, QStringLiteral("The selected saved connection no longer exists."));
     if (!privateOwnedFile(found->path))
         return fail(error, QStringLiteral("Refusing to change a connection with unsafe ownership or permissions."));
-    if (found->audio == audio)
+    if (found->devices == devices)
         return true;
     QList<Profile> updated = profiles_;
-    updated[std::distance(profiles_.cbegin(), found)].audio = audio;
+    updated[std::distance(profiles_.cbegin(), found)].devices = devices;
     if (!saveIndex(updated, error))
         return false;
     profiles_ = std::move(updated);

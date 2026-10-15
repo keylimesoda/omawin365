@@ -1,11 +1,18 @@
 #pragma once
 
 #include "oauthcontract.h"
-#include "audiooptions.h"
+#include "deviceoptions.h"
 #include <QObject>
 #include <QString>
 #include <QUrl>
 #include <memory>
+
+// Fixed per connection attempt: captured at Connect/Reconnect, never re-read mid-attempt.
+struct LaunchOptions {
+    int desktopScale = 100; // Percent, 100..500; anything else is sent as 100.
+    DeviceOptions devices;  // The connected Cloud PC's saved choices.
+    bool operator==(const LaunchOptions&) const = default;
+};
 
 class Session : public QObject
 {
@@ -17,7 +24,7 @@ public:
     void setDiagnosticsEnabled(bool enabled);
 
 public slots:
-    void start(const QString& profilePath, AudioOptions audio = {});
+    void start(const QString& profilePath, const LaunchOptions& options = {});
     void stop();
     void submitPin(const QString& pin);
     void submitAuthResult(const OAuthContract::Callback& result);

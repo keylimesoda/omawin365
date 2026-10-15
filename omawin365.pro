@@ -28,6 +28,7 @@ INCLUDEPATH += src
 SOURCES += \
     src/main.cpp \
     src/window.cpp \
+    src/displayscale.cpp \
     src/windowpresentation.cpp \
     src/theme.cpp \
     src/profilestore.cpp \
@@ -36,8 +37,9 @@ SOURCES += \
     src/promptparser.cpp \
     src/browserauth.cpp
 HEADERS += \
-    src/audiooptions.h \
+    src/deviceoptions.h \
     src/window.h \
+    src/displayscale.h \
     src/windowpresentation.h \
     src/theme.h \
     src/profilestore.h \

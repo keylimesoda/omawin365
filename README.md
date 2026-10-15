@@ -15,8 +15,6 @@ It works end to end with Windows 365 Enterprise on the maintainer's tenant, incl
 
 Other tenants and editions are untested. It has had extensive AI-assisted review but **no independent human security review yet**. Please [help review it](#help-review-it) before trusting it with a work account.
 
-Select a Cloud PC and configure **Audio** before connecting: **Play remote audio** sends Windows sound to your default local speakers/headphones, and **Forward microphone** sends your default local microphone to the Cloud PC. Both are off by default and saved separately for each PC. Disconnect before changing them, then connect again. Your organization's remote-session policy can still block audio redirection.
-
 Not affiliated with, endorsed by or supported by Microsoft or Omarchy. Microsoft, Windows, Windows 365 and the redrawn Windows 365 mark are Microsoft trademarks, used here only for identification. Provided **as-is, without warranty**, under the [MIT license](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Build
@@ -32,6 +30,13 @@ make test   # needs an X11/XWayland DISPLAY; see docs/TESTING.md
 The app needs **FreeRDP 3.32.2 built with `WITH_SSO_MIB=OFF`**. Arch's stock `freerdp` reached 3.32.2 on 2026-10-12, but Omarchy's package mirrors still had 3.31.1 on 2026-10-13, which the app rejects. Until they catch up, the recipe in [`packaging/freerdp`](packaging/freerdp) builds a private copy under `/usr/lib/omawin365/freerdp` without touching the distro package; see [packaging](docs/PACKAGING.md).
 
 **Why 3.32.2:** Microsoft's gateways use wildcard certificates (`*.wvd.microsoft.com`). FreeRDP 3.32.1 and older, when built without uriparser, discard wildcard names, so valid gateways look like a name mismatch. OMAWIN365 never accepts a certificate prompt, so every connection stopped. FreeRDP 3.32.2 fixes this ([FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653)), and the private copy builds it unmodified. Once Omarchy's mirrors carry 3.32.2, the package dependency will move to stock `freerdp`, and the private copy goes away.
+
+## Session settings
+
+Settings apply on the next Connect or Reconnect; a running session keeps the settings it started with, including the microphone.
+
+- **Display scale** sets the size of Windows text and icons for every Cloud PC. **Auto** follows the focused Omarchy monitor's scale.
+- **Play remote audio**, **Forward microphone** and **Share clipboard** are saved for the selected Cloud PC. Audio and microphone are off until you turn them on and use your default local devices. The clipboard carries text and images, never files. Your organization's policy can still block any of them.
 
 ## Help review it
 

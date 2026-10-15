@@ -1,11 +1,12 @@
 #!/bin/sh
-# Same candidate contract, with private install paths and explicit equivalent camera flag.
+# Same candidate contract, with private install paths, explicit camera flag, and the
+# WebAuthn channel (off by default upstream) so in-session security keys work.
 set -eu
 exec cmake -S "$1" -B "$2" -G 'Unix Makefiles' \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DBUILD_SHARED_LIBS=ON -DUSE_VERSION_FROM_GIT_TAG=OFF -DUSE_GIT_FOR_REVISION=OFF \
   -DCMAKE_INSTALL_PREFIX=/usr/lib/omawin365/freerdp -DCMAKE_INSTALL_LIBDIR=lib \
-  -DWITH_X11=ON -DWITH_AAD=ON -DWITH_SSO_MIB=OFF -DCHANNEL_RDPECAM_CLIENT=OFF \
+  -DWITH_X11=ON -DWITH_AAD=ON -DWITH_SSO_MIB=OFF -DCHANNEL_RDPECAM_CLIENT=OFF -DCHANNEL_RDPEWA=ON \
   -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
   -DWITH_CWALK=OFF -DWITH_WEBVIEW_AAD_AUTH_HELPER=OFF -DWITH_QT_AAD_AUTH_HELPER=OFF \
   -DWITH_CLIENT_SDL=OFF -DWITH_SERVER=OFF -DWITH_SAMPLE=OFF \

@@ -196,7 +196,7 @@ struct Session::State {
     QTimer versionTimer;
     VersionCheck versionCheck = VersionCheck::Idle;
     QString profilePath;
-    AudioOptions audio;
+    LaunchOptions options;
     QString executable;
     std::unique_ptr<QTemporaryDir> config;
     QSocketNotifier* reader = nullptr;
@@ -391,7 +391,7 @@ bool Session::active() const
     return state_->versionCheck != State::VersionCheck::Idle || state_->child > 0;
 }
 
-void Session::start(const QString& profilePath, AudioOptions audio)
+void Session::start(const QString& profilePath, const LaunchOptions& options)
 {
     // Terminal delivery/finalization must finish before a receiver can replace it.
     if (state_->terminalNotifications || state_->finalizing)
@@ -405,7 +405,9 @@ void Session::start(const QString& profilePath, AudioOptions audio)
     state_->stopping = false;
     state_->clearAttempt();
     state_->profilePath = profilePath;
-    state_->audio = audio;
+    state_->options = options;
+    if (state_->options.desktopScale < 100 || state_->options.desktopScale > 500)
+        state_->options.desktopScale = 100;
     state_->executable = QStandardPaths::findExecutable(QStringLiteral("xfreerdp3"));
     if (state_->executable.isEmpty()) {
         fail(QStringLiteral("xfreerdp3 was not found on PATH; install the omawin365-freerdp package."));
@@ -477,8 +479,8 @@ void Session::startTransport(const QString& profilePath)
         "FreeRDP_DrivesToRedirect:,FreeRDP_RedirectPrinters:FALSE,"
         "FreeRDP_RedirectSmartCards:FALSE,FreeRDP_RedirectSerialPorts:FALSE,"
         "FreeRDP_RedirectParallelPorts:FALSE,FreeRDP_AudioCapture:"
-        + QByteArray(state_->audio.capture ? "TRUE" : "FALSE")
-        + ",FreeRDP_AudioPlayback:" + QByteArray(state_->audio.playback ? "TRUE" : "FALSE")
+        + QByteArray(state_->options.devices.audioCapture ? "TRUE" : "FALSE")
+        + ",FreeRDP_AudioPlayback:" + QByteArray(state_->options.devices.audioPlayback ? "TRUE" : "FALSE")
         + ",FreeRDP_SupportSSHAgentChannel:FALSE,"
         "FreeRDP_DeviceRedirection:FALSE,FreeRDP_DeviceCount:0,"
         "FreeRDP_StaticChannelCount:0,FreeRDP_DynamicChannelCount:0,"
@@ -487,12 +489,17 @@ void Session::startTransport(const QString& profilePath)
         // load_addins rebuilds disp/drdynvc after the channel-count reset above.
         "FreeRDP_DynamicResolutionUpdate:TRUE,FreeRDP_SupportDisplayControl:TRUE,"
         "FreeRDP_SmartSizing:FALSE,FreeRDP_ParentWindowId:0,FreeRDP_EmbeddedWindow:FALSE,"
-        "FreeRDP_Decorations:TRUE,FreeRDP_ToggleFullscreen:TRUE,"
-        "FreeRDP_ActionScript:,FreeRDP_ConfigPath:" + QFile::encodeName(state_->config->path());
+        "FreeRDP_Decorations:TRUE,FreeRDP_ToggleFullscreen:TRUE,";
+    // Clipboard off is a user restriction; on leaves the connection file's choice.
+    if (!state_->options.devices.clipboard)
+        tune += "FreeRDP_RedirectClipboard:FALSE,";
+    tune += "FreeRDP_ActionScript:,FreeRDP_ConfigPath:" + QFile::encodeName(state_->config->path());
     std::vector<QByteArray> args = {
         QFile::encodeName(executable), QFile::encodeName(path),
         "+force-console-callbacks", "/gateway:type:arm", "/sec:aad", "/clipboard:files-to:off", "-auto-reconnect",
         "/t:OMAWIN365 - Windows 365", "/wm-class:" + state_->wmClass, "/size:80%",
+        // Windows draws at this DPI; display control resends it on every resize.
+        "/scale-desktop:" + QByteArray::number(state_->options.desktopScale), "/scale-device:100",
         "/log-level:WARN", "/log-filters:com.freerdp.client.x11:ERROR", tune
     };
     std::vector<char*> argv;

@@ -9,12 +9,17 @@
 #include "window_fixture.h"
 #include "windowpresentation.h"
 #include "theme.h"
+#include "displayscale.h"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QAbstractButton>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QScopeGuard>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -31,10 +36,91 @@
 #include <QVBoxLayout>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <atomic>
+#include <cstring>
+#include <limits>
+#include <mutex>
+#include <thread>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include <memory>
 #include <sys/stat.h>
 
 using WindowFixture::controls;
+
+// Hyprland's IPC socket on its own thread: DisplayScale queries it synchronously.
+class FakeHyprland {
+public:
+    explicit FakeHyprland(const QString& path)
+    {
+        m_fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        const QByteArray encoded = QFile::encodeName(path);
+        std::memcpy(address.sun_path, encoded.constData(), std::min<size_t>(encoded.size(), sizeof(address.sun_path) - 1));
+        m_ok = m_fd >= 0 && ::bind(m_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 && ::listen(m_fd, 8) == 0;
+        if (m_ok) m_thread = std::thread([this] { serve(); });
+    }
+    ~FakeHyprland()
+    {
+        m_stop = true;
+        if (m_thread.joinable()) m_thread.join();
+        if (m_fd >= 0) ::close(m_fd);
+    }
+    bool ok() const { return m_ok; }
+    void reply(const QByteArray& bytes, bool silent = false)
+    {
+        std::lock_guard lock(m_mutex);
+        m_reply = bytes;
+        m_silent = silent;
+    }
+    QList<QByteArray> requests()
+    {
+        std::lock_guard lock(m_mutex);
+        return m_requests;
+    }
+private:
+    void serve()
+    {
+        while (!m_stop) {
+            pollfd waiting{m_fd, POLLIN, 0};
+            if (::poll(&waiting, 1, 20) <= 0) continue;
+            const int client = ::accept4(m_fd, nullptr, nullptr, SOCK_CLOEXEC);
+            if (client < 0) continue;
+            char buffer[256];
+            pollfd readable{client, POLLIN, 0};
+            const ssize_t got = ::poll(&readable, 1, 500) > 0 ? ::read(client, buffer, sizeof(buffer)) : 0;
+            QByteArray reply;
+            bool silent = false;
+            {
+                std::lock_guard lock(m_mutex);
+                m_requests.append(QByteArray(buffer, int(std::max<ssize_t>(got, 0))));
+                reply = m_reply;
+                silent = m_silent;
+            }
+            if (silent) {
+                for (int i = 0; i < 50 && !m_stop; ++i) ::usleep(20000); // Hold the connection, say nothing.
+            } else {
+                for (qsizetype sent = 0; sent < reply.size();) {
+                    const ssize_t wrote = ::send(client, reply.constData() + sent, size_t(reply.size() - sent), MSG_NOSIGNAL);
+                    if (wrote <= 0) break;
+                    sent += wrote;
+                }
+            }
+            ::close(client);
+        }
+    }
+    int m_fd = -1;
+    bool m_ok = false;
+    std::atomic<bool> m_stop = false;
+    std::thread m_thread;
+    std::mutex m_mutex;
+    QByteArray m_reply;
+    bool m_silent = false;
+    QList<QByteArray> m_requests;
+};
 namespace {
 const QByteArray profileBytes = supportedProfile;
 bool writeFile(const QString& path, const QByteArray& bytes)
@@ -170,7 +256,7 @@ private:
         });
     }
 private slots:
-    void audioOptionsFollowProfilesAndReconnect()
+    void sessionSettingsFollowProfilesAndReconnect()
     {
         const auto first = seed("Audio PC");
         seed("Silent PC");
@@ -178,39 +264,52 @@ private slots:
         profiles()->setCurrentRow(0);
         auto* playback = window->findChild<QCheckBox*>("audioPlayback");
         auto* capture = window->findChild<QCheckBox*>("audioCapture");
-        QVERIFY(playback && capture);
-        QVERIFY(playback->isEnabled() && capture->isEnabled());
-        QVERIFY(!playback->isChecked() && !capture->isChecked());
+        auto* clipboard = accessible<QCheckBox>(window.get(), "Share clipboard");
+        auto* pending = window->findChild<QLabel*>("optionsPending");
+        QVERIFY(playback && capture && clipboard && pending);
+        QVERIFY(playback->isEnabled() && capture->isEnabled() && clipboard->isEnabled());
+        QVERIFY(!playback->isChecked() && !capture->isChecked() && clipboard->isChecked());
         playback->setFocus();
         QTest::keyClick(playback, Qt::Key_Space);
         capture->click();
         QCOMPARE(controls.starts.size(), 0);
-        QCOMPARE(store->profiles().first().audio.playback, true);
-        QCOMPARE(store->profiles().first().audio.capture, true);
+        QCOMPARE(store->profiles().first().devices.audioPlayback, true);
+        QCOMPARE(store->profiles().first().devices.audioCapture, true);
         profiles()->setCurrentRow(1);
         QVERIFY(!playback->isChecked() && !capture->isChecked());
         profiles()->setCurrentRow(0);
         QVERIFY(playback->isChecked() && capture->isChecked());
         QVERIFY(click(window.get(), "Connect"));
-        QCOMPARE(controls.audioStarts.size(), 1);
-        QVERIFY(controls.audioStarts.first().playback && controls.audioStarts.first().capture);
-        QVERIFY(!playback->isEnabled() && !capture->isEnabled());
-        QVERIFY(visibleLabelText(window.get(), "Disconnect to change audio settings; reconnect to apply."));
-        playback->setChecked(false); // Programmatic changes cannot alter an active session.
-        QVERIFY(playback->isChecked());
+        QCOMPARE(controls.options.size(), 1);
+        QVERIFY(controls.options.first().devices.audioPlayback && controls.options.first().devices.audioCapture);
+        QVERIFY(!pending->isVisible());
+        // Still editable while connected: the change is saved and waits for Reconnect.
+        QVERIFY(capture->isEnabled());
+        capture->click();
+        QVERIFY(!store->profiles().first().devices.audioCapture);
+        QVERIFY(pending->isVisible());
+        QCOMPARE(controls.stops, 0);
+        QCOMPARE(controls.starts.size(), 1);
+        capture->click();
+        QVERIFY(!pending->isVisible()); // Back to what the running session uses.
+        // Another Cloud PC's settings never mark this session pending.
         profiles()->setCurrentRow(1);
         QVERIFY(!playback->isChecked() && !capture->isChecked());
+        clipboard->click();
+        QVERIFY(!store->profiles().last().devices.clipboard);
+        QVERIFY(!pending->isVisible());
+        profiles()->setCurrentRow(0);
+        capture->click();
+        QVERIFY(pending->isVisible());
+        // Reconnect uses the connected Cloud PC's settings even when another is highlighted.
+        profiles()->setCurrentRow(1);
         QVERIFY(click(window.get(), "Reconnect"));
         finish();
         QCOMPARE(controls.starts.size(), 2);
         QCOMPARE(controls.starts.last(), first.path);
-        QVERIFY(controls.audioStarts.last().playback && controls.audioStarts.last().capture);
-        QVERIFY(!playback->isEnabled());
-        QVERIFY(click(window.get(), "Disconnect"));
-        finish();
-        QVERIFY(playback->isEnabled() && capture->isEnabled());
-        QVERIFY(click(window.get(), "Connect"));
-        QVERIFY(!controls.audioStarts.last().playback && !controls.audioStarts.last().capture);
+        QVERIFY(controls.options.last().devices.audioPlayback && !controls.options.last().devices.audioCapture);
+        QVERIFY(controls.options.last().devices.clipboard);
+        QVERIFY(!pending->isVisible());
     }
 
     void audioOptionsDisabledWithoutProfileAndRestoredOnReopen()
@@ -544,6 +643,8 @@ private slots:
         QCOMPARE(qgetenv("DBUS_SESSION_BUS_ADDRESS"),
             QByteArray("unix:path=") + qgetenv("HOME") + "/no-session-bus");
         QVERIFY(!QFileInfo::exists(QDir::homePath() + "/no-session-bus"));
+        // Auto must not consult the developer's live compositor.
+        qunsetenv("HYPRLAND_INSTANCE_SIGNATURE");
     }
     void init()
     {
@@ -767,6 +868,193 @@ private slots:
         finish();
         QCOMPARE(controls.starts.size(), 2);
     }
+    void displayScaleRounding()
+    {
+        QCOMPARE(DisplayScale::fromFactor(1.0), 100);
+        QCOMPARE(DisplayScale::fromFactor(1.25), 125);
+        QCOMPARE(DisplayScale::fromFactor(1.5), 150);
+        QCOMPARE(DisplayScale::fromFactor(1.6), 150);
+        QCOMPARE(DisplayScale::fromFactor(1.625), 175); // Ties round up.
+        QCOMPARE(DisplayScale::fromFactor(2.0), 200);
+        QCOMPARE(DisplayScale::fromFactor(0.5), 100);
+        QCOMPARE(DisplayScale::fromFactor(9.0), 500);
+        QCOMPARE(DisplayScale::fromFactor(0), 100);
+        QCOMPARE(DisplayScale::fromFactor(-2), 100);
+        QCOMPARE(DisplayScale::fromFactor(std::numeric_limits<double>::quiet_NaN()), 100);
+        QCOMPARE(DisplayScale::fromFactor(std::numeric_limits<double>::infinity()), 100);
+        QCOMPARE(DisplayScale::normalizeChoice(150), 150);
+        QCOMPARE(DisplayScale::normalizeChoice(QStringLiteral("175")), 175);
+        QCOMPARE(DisplayScale::normalizeChoice(160), DisplayScale::Auto);
+        QCOMPARE(DisplayScale::normalizeChoice(QStringLiteral("big")), DisplayScale::Auto);
+        QCOMPARE(DisplayScale::normalizeChoice(QVariant()), DisplayScale::Auto);
+    }
+    void hyprlandFocusedScale()
+    {
+        using DisplayScale::focusedScaleFromJson;
+        QCOMPARE(focusedScaleFromJson(R"([{"name":"DP-1","focused":false,"scale":1},{"name":"eDP-1","focused":true,"scale":1.6}])"),
+            std::optional<double>(1.6));
+        QVERIFY(!focusedScaleFromJson(R"([{"focused":false,"scale":2}])"));
+        QVERIFY(!focusedScaleFromJson(R"([{"focused":true,"scale":2},{"focused":true,"scale":1}])"));
+        QVERIFY(!focusedScaleFromJson(R"([{"focused":true,"scale":"2"}])"));
+        QVERIFY(!focusedScaleFromJson(R"([{"focused":true,"scale":0}])"));
+        QVERIFY(!focusedScaleFromJson(R"([{"focused":"true","scale":2}])"));
+        QVERIFY(!focusedScaleFromJson(R"({"focused":true,"scale":2})"));
+        QVERIFY(!focusedScaleFromJson("not json"));
+        QVERIFY(!focusedScaleFromJson({}));
+    }
+    std::unique_ptr<FakeHyprland> fakeHyprland(const char* signature = "fixture_1")
+    {
+        const QString runtime = temporary->filePath("runtime");
+        QDir().mkpath(runtime + "/hypr/fixture_1");
+        qputenv("XDG_RUNTIME_DIR", runtime.toUtf8());
+        qputenv("HYPRLAND_INSTANCE_SIGNATURE", signature);
+        return std::make_unique<FakeHyprland>(runtime + "/hypr/fixture_1/.socket.sock");
+    }
+    void autoScaleFollowsHyprland()
+    {
+        const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+        auto restore = qScopeGuard([&] { qputenv("XDG_RUNTIME_DIR", runtime); qunsetenv("HYPRLAND_INSTANCE_SIGNATURE"); });
+        auto hyprland = fakeHyprland();
+        QVERIFY(hyprland->ok());
+        hyprland->reply(R"([{"name":"DP-1","focused":false,"scale":1},{"name":"eDP-1","focused":true,"scale":1.6}])");
+        seed();
+        openWindow();
+        auto* scale = accessible<QComboBox>(window.get(), "Remote desktop scale");
+        QCOMPARE(scale->currentText(), "Auto (150%)");
+        QVERIFY(!hyprland->requests().isEmpty());
+        for (const auto& request : hyprland->requests()) QCOMPARE(request, QByteArray("j/monitors"));
+        QVERIFY(click(window.get(), "Connect"));
+        QCOMPARE(controls.options.last().desktopScale, 150);
+        auto* pending = window->findChild<QLabel*>("optionsPending");
+        QVERIFY(pending && !pending->isVisible());
+        // The focused monitor changes mid-session: activating the launcher re-reads Auto,
+        // and 200% is pending.
+        hyprland->reply(R"([{"name":"DP-2","focused":true,"scale":2}])");
+        window->activateWindow();
+        QTRY_VERIFY(window->isActiveWindow());
+        QEvent activated(QEvent::ActivationChange);
+        QApplication::sendEvent(window.get(), &activated);
+        QCOMPARE(scale->currentText(), "Auto (200%)");
+        QVERIFY(pending->isVisible());
+        QCOMPARE(controls.starts.size(), 1);
+        QCOMPARE(controls.stops, 0);
+        QVERIFY(click(window.get(), "Reconnect"));
+        controls.active = false;
+        emit session->ended();
+        settle();
+        QCOMPARE(controls.options.last().desktopScale, 200);
+        QVERIFY(!pending->isVisible());
+        // A fixed size never asks the compositor.
+        scale->setCurrentIndex(scale->findData(125));
+        const auto asked = hyprland->requests().size();
+        QVERIFY(window->isActiveWindow());
+        QEvent activation(QEvent::ActivationChange);
+        QApplication::sendEvent(window.get(), &activation);
+        settle();
+        QCOMPARE(hyprland->requests().size(), asked);
+    }
+    void autoScaleRejectsBadHyprlandReplies_data()
+    {
+        QTest::addColumn<QByteArray>("reply");
+        QTest::addColumn<bool>("silent");
+        QTest::addColumn<QByteArray>("signature");
+        QTest::newRow("malformed") << QByteArray("{not json") << false << QByteArray("fixture_1");
+        QTest::newRow("oversized") << (QByteArray("[{\"focused\":true,\"scale\":2,\"pad\":\"") + QByteArray(300 * 1024, 'x') + "\"}]")
+            << false << QByteArray("fixture_1");
+        QTest::newRow("silent") << QByteArray() << true << QByteArray("fixture_1");
+        QTest::newRow("unsafe-signature") << QByteArray(R"([{"focused":true,"scale":2}])") << false << QByteArray("../hypr/fixture_1");
+    }
+    void autoScaleRejectsBadHyprlandReplies()
+    {
+        QFETCH(QByteArray, reply);
+        QFETCH(bool, silent);
+        QFETCH(QByteArray, signature);
+        const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+        auto restore = qScopeGuard([&] { qputenv("XDG_RUNTIME_DIR", runtime); qunsetenv("HYPRLAND_INSTANCE_SIGNATURE"); });
+        auto hyprland = fakeHyprland(signature.constData());
+        QVERIFY(hyprland->ok());
+        hyprland->reply(reply, silent);
+        QElapsedTimer elapsed;
+        elapsed.start();
+        openWindow();
+        QVERIFY(elapsed.elapsed() < 2000); // Bounded: a silent compositor costs at most the query budget.
+        // Falls back to the offscreen screen's 100%.
+        QCOMPARE(accessible<QComboBox>(window.get(), "Remote desktop scale")->currentText(), "Auto (100%)");
+        if (signature.contains('/')) QVERIFY(hyprland->requests().isEmpty());
+    }
+    void remoteOptionsPersistAndNeverConnect()
+    {
+        seed();
+        openWindow();
+        auto* scale = accessible<QComboBox>(window.get(), "Remote desktop scale");
+        auto* clipboard = accessible<QCheckBox>(window.get(), "Share clipboard");
+        QVERIFY(scale && clipboard);
+        QCOMPARE(scale->currentData().toInt(), DisplayScale::Auto);
+        QCOMPARE(scale->currentText(), "Auto (100%)"); // Offscreen screen, no compositor.
+        QVERIFY(clipboard->isChecked());
+        scale->setCurrentIndex(scale->findData(175));
+        clipboard->setChecked(false);
+        QVERIFY(controls.starts.isEmpty());
+        QCOMPARE(QSettings().value("remoteDesktop/scale").toInt(), 175);
+        QVERIFY(!store->profiles().first().devices.clipboard);
+        window.reset();
+        openWindow();
+        scale = accessible<QComboBox>(window.get(), "Remote desktop scale");
+        clipboard = accessible<QCheckBox>(window.get(), "Share clipboard");
+        QCOMPARE(scale->currentData().toInt(), 175);
+        QVERIFY(!clipboard->isChecked());
+        QVERIFY(controls.starts.isEmpty());
+        QVERIFY(click(window.get(), "Connect"));
+        QCOMPARE(controls.options.size(), 1);
+        QCOMPARE(controls.options.first().desktopScale, 175);
+        QVERIFY(!controls.options.first().devices.clipboard);
+    }
+    void remoteOptionsInvalidSettingsFallBack()
+    {
+        QSettings().setValue("remoteDesktop/scale", 160);
+        QSettings().setValue("remoteDesktop/clipboard", "false");
+        seed();
+        openWindow();
+        QCOMPARE(accessible<QComboBox>(window.get(), "Remote desktop scale")->currentData().toInt(), DisplayScale::Auto);
+        QVERIFY(accessible<QCheckBox>(window.get(), "Share clipboard")->isChecked()); // The old app-wide key is ignored.
+        QVERIFY(click(window.get(), "Connect"));
+        QCOMPARE(controls.options.first().desktopScale, 100);
+    }
+    void remoteOptionsApplyOnReconnect()
+    {
+        auto saved = seed();
+        openWindow();
+        auto* scale = accessible<QComboBox>(window.get(), "Remote desktop scale");
+        auto* clipboard = accessible<QCheckBox>(window.get(), "Share clipboard");
+        auto* pending = window->findChild<QLabel*>("optionsPending");
+        QVERIFY(pending);
+        scale->setCurrentIndex(scale->findData(150));
+        QVERIFY(!pending->isVisible()); // No session: nothing is pending.
+        QVERIFY(click(window.get(), "Connect"));
+        QCOMPARE(controls.options.last().desktopScale, 150);
+        QVERIFY(controls.options.last().devices.clipboard);
+        QVERIFY(!pending->isVisible());
+        // A change during a session never stops or starts one; it waits for Reconnect.
+        scale->setCurrentIndex(scale->findData(200));
+        clipboard->setChecked(false);
+        QVERIFY(pending->isVisible());
+        QCOMPARE(controls.stops, 0);
+        QCOMPARE(controls.starts.size(), 1);
+        scale->setCurrentIndex(scale->findData(150));
+        clipboard->setChecked(true);
+        QVERIFY(!pending->isVisible()); // Back to what the running session uses.
+        scale->setCurrentIndex(scale->findData(200));
+        QVERIFY(pending->isVisible());
+        QVERIFY(click(window.get(), "Reconnect"));
+        // Options are captured at the Reconnect press, not when the old session ends.
+        scale->setCurrentIndex(scale->findData(250));
+        controls.active = false;
+        emit session->ended();
+        settle();
+        QCOMPARE(controls.starts, (QStringList{saved.path, saved.path}));
+        QCOMPARE(controls.options.last().desktopScale, 200);
+        QVERIFY(pending->isVisible()); // 250 is still pending for the new session.
+    }
     void closeActiveSession_data()
     {
         QTest::addColumn<bool>("accept");
@@ -847,6 +1135,8 @@ private slots:
             QVERIFY(button(keyPrompt, "Done") && button(keyPrompt, "Done")->isEnabled());
             QCOMPARE(controls.stops, 0);
         };
+        settle();
+        const QSize size = keyPrompt->size();
         QTest::keyClicks(input, "2468");
         QVERIFY(button(keyPrompt, "Submit PIN")->isEnabled());
         QTest::keyClick(input, Qt::Key_Return);
@@ -854,6 +1144,11 @@ private slots:
         QCOMPARE(controls.pins, QStringList{"2468"});
         QCOMPARE(input->text(), "");
         QVERIFY(!input->isVisible());
+        settle();
+        // The touch step reuses the PIN slot; the dialog keeps its size.
+        QCOMPARE(keyPrompt->size(), size);
+        QVERIFY(visibleLabelText(keyPrompt, "Sent once. Never retried automatically."));
+        QVERIFY(reveal(button(keyPrompt, "Done")));
         QCOMPARE(keyPrompt->windowTitle(), "OMAWIN365 · touch your security key");
         QVERIFY(button(keyPrompt, "Done") && button(keyPrompt, "Done")->isEnabled());
         QCOMPARE(phase()->text(), "Touch your security key");
@@ -951,6 +1246,11 @@ private slots:
         QVERIFY(keyPrompt);
         auto* input = accessible<QLineEdit>(keyPrompt, "Security key PIN");
         QTRY_VERIFY(input->isEnabled());
+        settle();
+        // Hyprland focus follows the mouse: no focus state may resize the dialog.
+        const QSize size = keyPrompt->size();
+        auto* focusButton = button(keyPrompt, "Click to enter PIN");
+        QVERIFY(focusButton && !focusButton->isVisible());
         QTest::keyClicks(input, "2468");
         QVERIFY(button(keyPrompt, "Submit PIN")->isEnabled());
         // Offscreen Qt activation only: no compositor/display proof is claimed.
@@ -958,6 +1258,10 @@ private slots:
         QTRY_VERIFY(!keyPrompt->isActiveWindow());
         QTRY_VERIFY(!input->isEnabled());
         QCOMPARE(input->text(), "");
+        settle();
+        QVERIFY(focusButton->isVisible());
+        QVERIFY(!input->isVisible());
+        QCOMPARE(keyPrompt->size(), size);
         QVERIFY(!button(keyPrompt, "Submit PIN")->isEnabled());
         QTest::keyClicks(input, "1357");
         QTest::keyClick(input, Qt::Key_Return);
@@ -965,6 +1269,9 @@ private slots:
         QVERIFY(controls.pins.isEmpty());
         keyPrompt->activateWindow();
         QTRY_VERIFY(input->isEnabled());
+        settle();
+        QVERIFY(input->isVisible() && !focusButton->isVisible());
+        QCOMPARE(keyPrompt->size(), size);
         QVERIFY(!button(keyPrompt, "Submit PIN")->isEnabled());
         QVERIFY(click(keyPrompt, "Cancel and disconnect"));
         QCOMPARE(controls.stops, 1);
@@ -1333,6 +1640,7 @@ private slots:
             QVERIFY(!visibleLabelText(panel, "Synthetic browser cancelled"));
             QVERIFY(!downloadStatus || downloadStatus->text() == "Synthetic browser finding Cloud PCs");
         };
+        QVERIFY(reveal(button(guide, "Cancel")));
         QVERIFY(click(guide, "Cancel"));
         QVERIFY(cancelStatusEmitted);
         QCOMPARE(controls.cancellations, 1);
