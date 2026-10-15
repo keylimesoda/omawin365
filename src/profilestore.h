@@ -1,5 +1,7 @@
 #pragma once
 
+#include "audiooptions.h"
+
 #include <QObject>
 #include <QList>
 #include <QString>
@@ -8,6 +10,7 @@ struct Profile {
     QString id;
     QString name;
     QString path;
+    AudioOptions audio{};
 };
 
 class ProfileStore final : public QObject {
@@ -17,6 +20,7 @@ public:
     QList<Profile> profiles() const;
     Profile importFile(const QString& sourcePath, QString* error, const QString& displayName = {});
     bool renameProfile(const QString& id, const QString& name, QString* error);
+    bool setAudioOptions(const QString& id, AudioOptions audio, QString* error);
     bool removeProfile(const QString& id, QString* error);
 
 signals:

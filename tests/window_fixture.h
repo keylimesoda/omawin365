@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../src/audiooptions.h"
+
 #include <QStringList>
 #include <QUrl>
 #include <QList>
@@ -11,6 +13,7 @@ namespace WindowFixture {
 struct Controls {
     bool active = false;
     QStringList starts;
+    QList<AudioOptions> audioStarts;
     int stops = 0;
     QStringList pins;
     QList<QUrl> callbacks;

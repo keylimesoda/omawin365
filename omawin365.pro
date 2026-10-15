@@ -36,6 +36,7 @@ SOURCES += \
     src/promptparser.cpp \
     src/browserauth.cpp
 HEADERS += \
+    src/audiooptions.h \
     src/window.h \
     src/windowpresentation.h \
     src/theme.h \

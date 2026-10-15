@@ -123,6 +123,13 @@ void ProfileStore::loadIndex()
         const auto object = value.toObject();
         const QString id = object.value(QStringLiteral("id")).toString();
         const QString name = object.value(QStringLiteral("name")).toString();
+        const auto playback = object.value(QStringLiteral("audioPlayback"));
+        const auto capture = object.value(QStringLiteral("audioCapture"));
+        if ((!playback.isUndefined() && !playback.isBool())
+            || (!capture.isUndefined() && !capture.isBool())) {
+            initializationError_ = QStringLiteral("The saved profile list contains invalid audio settings; it was left unchanged.");
+            return;
+        }
         if (!profileId.match(id).hasMatch() || seen.contains(id) || name.isEmpty() || name.size() > 160) {
             initializationError_ = QStringLiteral("The saved profile list contains invalid metadata; it was left unchanged.");
             return;
@@ -133,7 +140,7 @@ void ProfileStore::loadIndex()
             return;
         }
         seen.insert(id);
-        loaded.append({id, name, path});
+        loaded.append({id, name, path, {playback.toBool(false), capture.toBool(false)}});
     }
     profiles_ = std::move(loaded);
     index_ = bytes;
@@ -156,7 +163,9 @@ bool ProfileStore::saveIndex(const QList<Profile>& profiles, QString* error)
         return fail(error, QStringLiteral("Saved connections were changed by another OMAWIN365 instance. Restart OMAWIN365 and try again."));
     QJsonArray array;
     for (const auto& profile : profiles)
-        array.append(QJsonObject{{QStringLiteral("id"), profile.id}, {QStringLiteral("name"), profile.name}});
+        array.append(QJsonObject{{QStringLiteral("id"), profile.id}, {QStringLiteral("name"), profile.name},
+            {QStringLiteral("audioPlayback"), profile.audio.playback},
+            {QStringLiteral("audioCapture"), profile.audio.capture}});
     const QByteArray bytes = QJsonDocument(array).toJson(QJsonDocument::Compact);
     if (!atomicPrivateWrite(path, bytes, error))
         return false;
@@ -230,6 +239,30 @@ bool ProfileStore::renameProfile(const QString& id, const QString& name, QString
         return true;
     QList<Profile> updated = profiles_;
     updated[std::distance(profiles_.cbegin(), found)].name = normalized;
+    if (!saveIndex(updated, error))
+        return false;
+    profiles_ = std::move(updated);
+    emit changed();
+    return true;
+}
+
+bool ProfileStore::setAudioOptions(const QString& id, AudioOptions audio, QString* error)
+{
+    if (error)
+        error->clear();
+    if (!initializationError_.isEmpty())
+        return fail(error, initializationError_);
+    if (!ensurePrivateRoot(error))
+        return false;
+    const auto found = std::find_if(profiles_.cbegin(), profiles_.cend(), [&id](const Profile& profile) { return profile.id == id; });
+    if (found == profiles_.cend())
+        return fail(error, QStringLiteral("The selected saved connection no longer exists."));
+    if (!privateOwnedFile(found->path))
+        return fail(error, QStringLiteral("Refusing to change a connection with unsafe ownership or permissions."));
+    if (found->audio == audio)
+        return true;
+    QList<Profile> updated = profiles_;
+    updated[std::distance(profiles_.cbegin(), found)].audio = audio;
     if (!saveIndex(updated, error))
         return false;
     profiles_ = std::move(updated);

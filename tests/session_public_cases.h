@@ -1409,6 +1409,44 @@ private slots:
         const QByteArray utf16 = encoder.encode(QString::fromUtf8(fullerProfile));
         QTest::newRow("fuller-saved-utf16le") << utf16 << true;
     }
+    void audioLaunchOptions_data()
+    {
+        QTest::addColumn<bool>("playback");
+        QTest::addColumn<bool>("capture");
+        QTest::newRow("off") << false << false;
+        QTest::newRow("playback") << true << false;
+        QTest::newRow("microphone") << false << true;
+        QTest::newRow("both") << true << true;
+    }
+    void audioLaunchOptions()
+    {
+        QFETCH(bool, playback);
+        QFETCH(bool, capture);
+        SessionFixture fixture;
+        QVERIFY(fixture.init());
+        fixture.session.start(fixture.profile(), {playback, capture});
+        QTRY_COMPARE_WITH_TIMEOUT(fixture.events(QStringLiteral("terminal")).size(), 1, 3000);
+        const auto args = fixture.events(QStringLiteral("transport")).first().value(QStringLiteral("argv")).toArray();
+        QCOMPARE(args.size(), 12);
+        const QString tune = args.last().toString();
+        QVERIFY(tune.contains(QStringLiteral("FreeRDP_AudioPlayback:%1,").arg(playback ? "TRUE" : "FALSE")));
+        QVERIFY(tune.contains(QStringLiteral("FreeRDP_AudioCapture:%1,").arg(capture ? "TRUE" : "FALSE")));
+        for (const auto* flag : {"FreeRDP_RedirectDrives:FALSE", "FreeRDP_RedirectPrinters:FALSE",
+                                "FreeRDP_IgnoreCertificate:FALSE", "FreeRDP_RedirectWebAuthN:TRUE"})
+            QVERIFY(tune.contains(QString::fromLatin1(flag)));
+        fixture.session.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(fixture.ended.count(), 1, 3000);
+        fixture.session.start(fixture.profile());
+        QTRY_COMPARE_WITH_TIMEOUT(fixture.events(QStringLiteral("terminal")).size(), 2, 3000);
+        const QString defaults = fixture.events(QStringLiteral("transport")).last()
+            .value(QStringLiteral("argv")).toArray().last().toString();
+        QVERIFY(defaults.contains("FreeRDP_AudioPlayback:FALSE,"));
+        QVERIFY(defaults.contains("FreeRDP_AudioCapture:FALSE,"));
+        fixture.session.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(fixture.ended.count(), 2, 3000);
+        QCOMPARE(fixture.errors.count(), 0);
+    }
+
     void publicRestrictedLaunchContract()
     {
         QFETCH(QByteArray, bytes);
