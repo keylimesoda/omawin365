@@ -378,6 +378,25 @@ private slots:
         QCOMPARE(controls.rememberSignIn, 0);
         emit browser->signInForgotten(true);
     }
+    void failedForgetOfferedAfterRestart()
+    {
+        openWindow();
+        window->findChild<QComboBox*>("rememberSignIn")->setCurrentIndex(2);
+        window->findChild<QPushButton*>("forgetSignIn")->click();
+        emit browser->signInForgotten(false);
+        window.reset();
+        openWindow(); // Off is restored, but the keyring item may still be there.
+        auto* forget = window->findChild<QPushButton*>("forgetSignIn");
+        QCOMPARE(window->findChild<QComboBox*>("rememberSignIn")->currentText(), "Off");
+        QVERIFY(!forget->isHidden() && forget->isEnabled());
+        QVERIFY(window->findChild<QLabel*>("signInCacheNote")->text().contains("may still be in the system keyring"));
+        forget->click();
+        emit browser->signInForgotten(true);
+        QVERIFY(forget->isHidden());
+        window.reset();
+        openWindow();
+        QVERIFY(window->findChild<QPushButton*>("forgetSignIn")->isHidden());
+    }
     void rememberSignInRestoredOnReopen()
     {
         QSettings().setValue("rememberSignIn", "device");

@@ -65,7 +65,7 @@ QString rememberNote(RememberSignIn mode)
     case RememberSignIn::Off:
         break;
     }
-    return QStringLiteral("You sign in to Microsoft each time you connect.");
+    return QStringLiteral("Nothing is kept after OMAWIN365 closes.");
 }
 
 class PinValidator final : public QValidator {
@@ -244,7 +244,11 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_rememberMode = rememberModeFromSetting(QSettings().value(QStringLiteral("rememberSignIn")));
     m_rememberSignIn->setCurrentIndex(m_rememberSignIn->findData(int(m_rememberMode)));
     m_browser->setRememberSignIn(m_rememberMode);
-    m_signInCacheNote->setText(rememberNote(m_rememberMode));
+    // Set until the keyring confirms a deletion, so a failed one is still offered after a restart.
+    m_forgetFailed = QSettings().value(QStringLiteral("rememberSignInDeletePending"), false).toBool();
+    m_signInCacheNote->setText(m_forgetFailed
+        ? QStringLiteral("A saved sign-in may still be in the system keyring. Choose Forget sign-in to remove it.")
+        : rememberNote(m_rememberMode));
     connect(m_rememberSignIn, &QComboBox::currentIndexChanged, this, [this] {
         const auto previous = m_rememberMode;
         m_rememberMode = BrowserAuth::RememberSignIn(m_rememberSignIn->currentData().toInt());
@@ -259,6 +263,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
         // Leaving the keyring setting deletes what it saved; memory stays.
         m_forgettingSignIn = true;
         m_signInCacheNote->setText(QStringLiteral("Removing sign-in from the system keyring…"));
+        QSettings().setValue(QStringLiteral("rememberSignInDeletePending"), true);
         updateControls();
         m_browser->forgetSavedSignIn();
     });
@@ -267,6 +272,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     connect(m_browser, &BrowserAuth::signInForgotten, this, [this](bool ok) {
         m_forgettingSignIn = false;
         m_forgetFailed = !ok;
+        if (ok) QSettings().remove(QStringLiteral("rememberSignInDeletePending"));
         m_signInCacheNote->setText(!ok
             ? QStringLiteral("The system keyring could not remove the saved sign-in. Unlock your keyring and choose Forget sign-in again.")
             : m_rememberMode == BrowserAuth::RememberSignIn::Off
@@ -983,6 +989,7 @@ void Window::forgetSignIn()
         m_rememberSignIn->setCurrentIndex(m_rememberSignIn->findData(int(m_rememberMode)));
     }
     m_signInCacheNote->setText(QStringLiteral("Removing remembered sign-in…"));
+    QSettings().setValue(QStringLiteral("rememberSignInDeletePending"), true);
     updateControls();
     m_browser->forgetSignIn();
 }

@@ -3,6 +3,7 @@
 #include "../src/browserauth.cpp"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QUrlQuery>
 #include <cstdio>
 #include <sys/syscall.h>
@@ -209,9 +210,23 @@ struct BrowserAuthTestAccess {
             check(completed == 1 && state.nextId == id,
                   "default private mode never exports cookies or accesses the keyring");
         }
-        {
+        // Counts real keyring jobs. D-Bus is unreachable here, so each one fails fast but still reports.
+        const auto keyringCalls = [](BrowserAuth::Private& state) {
+            int calls = 0;
+            const auto count = [&calls] { ++calls; };
+            const auto a = QObject::connect(&state.cache, &SignInCache::loaded, count);
+            const auto b = QObject::connect(&state.cache, &SignInCache::saved, count);
+            QElapsedTimer waited;
+            waited.start();
+            while (waited.elapsed() < 1000 && !calls) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QObject::disconnect(a);
+            QObject::disconnect(b);
+            return calls;
+        };
+        for (const Mode mode : {Mode::AppSession, Mode::Device}) {
+            const bool device = mode == Mode::Device;
             BrowserAuth browser;
-            prepare(browser, Mode::AppSession);
+            prepare(browser, mode);
             auto& state = *browser.d;
             QString notice;
             QObject::connect(&browser, &BrowserAuth::signInCacheNotice, [&](const QString& text) { notice = text; });
@@ -220,14 +235,20 @@ struct BrowserAuthTestAccess {
             state.snapshotSignIn([&] { ++completed; });
             state.handleMessage({{"id", id}, {"result", QJsonObject{{"cookies", QJsonArray{persistentCookie, sessionCookie}}}}});
             check(completed == 1 && state.liveSignInCookies.size() == 2 && state.restoreCookies.size() == 2,
-                  "until-app-closes keeps session and persistent sign-in cookies in memory");
-            check(notice.contains("until you close OMAWIN365"),
-                  "until-app-closes never saves to the keyring");
-            state.active = true;
-            state.loadingCache = false;
-            state.startBrowser();
-            check(!state.loadingCache,
-                  "until-app-closes never loads from the keyring");
+                  "both remembering choices keep session and persistent sign-in cookies in memory");
+            check(keyringCalls(state) == (device ? 1 : 0),
+                  device ? "on-this-device saves to the keyring" : "until-app-closes never saves to the keyring");
+            if (!device)
+                check(notice.contains("until you close OMAWIN365"), "until-app-closes says how long sign-in is kept");
+            if (device) {
+                // Starting without memory waits on a keyring load. Until-app-closes would
+                // launch Chromium here instead, so only the keyring choice is driven.
+                state.liveSignInCookies = {};
+                state.active = true;
+                state.startBrowser();
+                state.active = false; // The finished load must not launch anything.
+                check(state.loadingCache && keyringCalls(state) == 1, "on-this-device loads from the keyring");
+            }
         }
         {
             BrowserAuth browser;

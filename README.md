@@ -37,7 +37,7 @@ Settings apply on the next Connect or Reconnect; a running session keeps the set
 
 - **Display scale** sets the size of Windows text and icons for every Cloud PC. **Auto** follows the focused Omarchy monitor's scale.
 - **Play remote audio**, **Forward microphone** and **Share clipboard** are saved for the selected Cloud PC. Audio and microphone are off until you turn them on and use your default local devices. The clipboard carries text and images, never files. Your organization's policy can still block any of them.
-- **Remember sign-in** is for every Cloud PC and is **Off** by default, so you sign in to Microsoft each time.
+- **Remember sign-in** is for every Cloud PC and is **Off** by default: nothing is saved, and the private sign-in browser forgets everything when the app closes.
   - **Until the app closes** keeps Microsoft's sign-in cookies in memory, so Reconnect doesn't ask again.
   - **On this device (keyring)** also saves Microsoft's long-lived sign-in cookies in your system keyring (Secret Service), so sign-in can survive a restart. Accept Microsoft's **Stay signed in?** prompt to get them. Anything that can read your unlocked keyring can use them until they expire.
   - Either way, Microsoft and your organization's policy decide when to ask again, including for your security key. Only cookies for `login.microsoftonline.com` are kept: never passwords, PINs or tokens.
