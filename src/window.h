@@ -1,5 +1,7 @@
 #pragma once
 
+#include "session.h"
+
 #include <QPointer>
 #include <QWidget>
 
@@ -7,13 +9,15 @@ class BrowserAuth;
 class ProfileStore;
 class Session;
 class Theme;
-class QCloseEvent;
 class QCheckBox;
+class QCloseEvent;
+class QComboBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QStackedWidget;
 class QVBoxLayout;
 
 class Window final : public QWidget {
@@ -25,6 +29,7 @@ public:
 protected:
     void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
 private:
     void refreshProfiles(const QString& preferredId = {});
@@ -48,8 +53,15 @@ private:
     void showError(const QString& title, const QString& message);
     void showAbout();
     void applySpacing();
+    // Session settings: scale is app-wide, devices are per Cloud PC; captured per attempt at Connect/Reconnect.
+    LaunchOptions launchOptions(const QString& path) const;
+    void refreshAutoScale();
+    void updatePendingOptions();
     QString selectedId() const;
     QString selectedPath() const;
+    DeviceOptions devicesForPath(const QString& path) const;
+    void refreshDeviceOptions();
+    void saveDeviceOptions();
 
     Session* m_session;
     BrowserAuth* m_browser;
@@ -72,6 +84,12 @@ private:
     QPushButton* m_forgetSignIn;
     QLabel* m_signInCacheNote;
     bool m_forgettingSignIn = false;
+    QComboBox* m_scale;
+    QCheckBox* m_clipboard;
+    QLabel* m_optionsPending;
+    QCheckBox* m_audioPlayback;
+    QCheckBox* m_audioCapture;
+    QLabel* m_devicesNote;
     QVBoxLayout* m_contentLayout;
     QWidget* m_connectionPanel;
     QVBoxLayout* m_statusLayout;
@@ -79,7 +97,12 @@ private:
         QPointer<QDialog> dialog;
         QPointer<QLineEdit> pin;
         QPointer<QLabel> title;
+        QPointer<QLabel> message;
         QPointer<QLabel> detail;
+        // One fixed-height slot: focus button, PIN field or touch note. Focus
+        // follows the mouse on Hyprland, so the dialog must not resize per state.
+        QPointer<QStackedWidget> slot;
+        QPointer<QWidget> sent;
         QPointer<QPushButton> submit;
         QPointer<QPushButton> focus;
     } m_challenge;
@@ -99,6 +122,9 @@ private:
     bool m_idlePrompt = true; // The detail text is our own idle prompt, not a status message.
     QString m_activeProfile;
     QString m_restartPath;
+    int m_autoScale = 100; // Last Auto result; refreshed only while Auto is selected.
+    LaunchOptions m_activeOptions;
+    LaunchOptions m_restartOptions;
     bool m_connected = false;
     bool m_stopping = false;
     bool m_closePending = false;

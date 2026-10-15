@@ -387,19 +387,19 @@ void Theme::reload()
     style += "QLabel[role=error] { color: " + css(urgent) + "; font-weight: bold; }";
     style += "QFrame#statusPanel { " + borderStyle(values, "menu.border", text,
         number(values, "menu.border-alpha", 1), normalWidth) + " }";
-    style += "QPushButton, QLineEdit, QListWidget { border-radius: 0; " + normalBorder
+    style += "QPushButton, QLineEdit, QListWidget, QComboBox { border-radius: 0; " + normalBorder
         + " background: " + normalFill + "; }";
     style += "QPushButton { padding: " + QString::number(spacing("control-padding-y", 6)) + "px "
         + QString::number(spacing("control-padding-x", 10)) + "px; }";
     style += "QPushButton:checked { " + selectedBorder + " background: " + selectedFill
         + "; color: " + css(selectedColor) + "; }";
-    style += "QPushButton:hover, QLineEdit:hover, QListWidget:hover { " + hoverBorder
+    style += "QPushButton:hover, QLineEdit:hover, QListWidget:hover, QComboBox:hover { " + hoverBorder
         + " background: " + hoverFill + "; }";
     // Include combined selectors: specificity, not just source order, must keep
     // actual keyboard focus ahead of hover and a persistent checked state.
     style += "QPushButton:focus, QPushButton:focus:hover, QPushButton:focus:checked, "
         "QPushButton:focus:hover:checked, QLineEdit:focus, QLineEdit:focus:hover, "
-        "QListWidget:focus, QListWidget:focus:hover { " + focusBorder
+        "QListWidget:focus, QListWidget:focus:hover, QComboBox:focus, QComboBox:focus:hover { " + focusBorder
         + " background: " + focusFill + "; }";
     style += "QPushButton:pressed, QPushButton:pressed:hover, QPushButton:pressed:checked, "
         "QPushButton:pressed:focus, QPushButton:pressed:focus:hover, "
@@ -408,9 +408,16 @@ void Theme::reload()
         + fill("pressed", pressedColor, 0.22) + "; }";
     style += "QPushButton[primary=true] { color: " + css(accent) + "; }";
     style += "QPushButton:disabled { color: " + css(muted) + "; }";
+    style += "QCheckBox:disabled { color: " + css(muted) + "; }";
     style += "QLineEdit { padding: " + QString::number(spacing("input-padding-y", 7)) + "px "
         + QString::number(spacing("control-padding-x", 10)) + "px; selection-background-color: "
         + css(selection) + "; selection-color: " + css(text) + "; }";
+    style += "QComboBox { padding: " + QString::number(spacing("control-padding-y", 6)) + "px "
+        + QString::number(spacing("control-padding-x", 10)) + "px; }";
+    style += "QComboBox:disabled { color: " + css(muted) + "; }";
+    style += "QComboBox QAbstractItemView { " + normalBorder + " background: " + css(surface)
+        + "; color: " + css(text) + "; selection-background-color: " + selectedFill
+        + "; selection-color: " + css(selectedColor) + "; }";
     style += "QListWidget { padding: " + QString::number(spacing("xs", 3)) + "px; }";
     style += "QListWidget::item { padding: " + QString::number(spacing("row-gap", 8)) + "px; "
         "border: none; background: transparent; }";

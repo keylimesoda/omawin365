@@ -69,6 +69,13 @@ The app needs **FreeRDP 3.32.2 built with `WITH_SSO_MIB=OFF`**. Arch's stock `fr
 
 **Why 3.32.2:** Microsoft's gateways use wildcard certificates (`*.wvd.microsoft.com`). FreeRDP 3.32.1 and older, when built without uriparser, discard wildcard names, so valid gateways look like a name mismatch. OMAWIN365 never accepts a certificate prompt, so every connection stopped. FreeRDP 3.32.2 fixes this ([FreeRDP#13653](https://github.com/FreeRDP/FreeRDP/pull/13653)), and the private copy builds it unmodified. Once Omarchy's mirrors carry 3.32.2, the package dependency will move to stock `freerdp`, and the private copy goes away.
 
+## Session settings
+
+Settings apply on the next Connect or Reconnect; a running session keeps the settings it started with, including the microphone.
+
+- **Display scale** sets the size of Windows text and icons for every Cloud PC. **Auto** follows the focused Omarchy monitor's scale.
+- **Play remote audio**, **Forward microphone** and **Share clipboard** are saved for the selected Cloud PC. Audio and microphone are off until you turn them on and use your default local devices. The clipboard carries text and images, never files. Your organization's policy can still block any of them.
+
 ## Help review it
 
 The [security review brief](docs/SECURITY-REVIEW-BRIEF.md) explains what the app does, where the risk is and the five questions we most want answered. It takes about 10 minutes to read. Human reviews and AI-assisted reviews are both welcome; please read [contributing](CONTRIBUTING.md) first. Report anything exploitable privately: see [SECURITY.md](SECURITY.md).

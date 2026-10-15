@@ -1,26 +1,36 @@
 # Local prototype, NOT submission/release approval. See ../README.md.
 pkgname=omawin365-freerdp
 pkgver=3.32.2
-pkgrel=1
+pkgrel=3
 pkgdesc='Private FreeRDP provider for OMAWIN365 (SSO and camera client off)'
 arch=('x86_64')
 url='https://www.freerdp.com/'
 license=('Apache-2.0' 'MIT' 'LGPL-2.1-or-later' 'LicenseRef-uwac')
 # No provides/replaces/conflicts: distro freerdp remains untouched.
 depends=('alsa-lib' 'e2fsprogs' 'ffmpeg' 'fuse3' 'glibc' 'icu' 'jansson'
-         'krb5' 'libcups' 'libgcc' 'libice' 'libpulse' 'libsm' 'libusb'
+         'krb5' 'libcbor' 'libcups' 'libfido2' 'libgcc' 'libice' 'libpulse' 'libsm' 'libusb'
          'libx11' 'libxcursor' 'libxext' 'libxfixes' 'libxi' 'libxinerama'
          'libxkbcommon' 'libxkbfile' 'libxrandr' 'libxrender' 'libxv'
          'openssl' 'pcsclite' 'sndio' 'systemd-libs' 'wayland' 'zlib')
 makedepends=('cmake' 'pkgconf' 'python')
 _commit=97eff6ddfbbfaa8e42a126d362686bd001ff8bdc
 source=("FreeRDP-$_commit.tar.gz::https://github.com/FreeRDP/FreeRDP/archive/$_commit.tar.gz"
-        'configure.sh' 'accepted-features.txt' 'check-contract.py' 'uwac-NOTICES.txt')
+        'configure.sh' 'accepted-features.txt' 'check-contract.py' 'uwac-NOTICES.txt'
+        '0001-rdpewa-allow-overlapping-channels.patch')
 sha256sums=('e99ebb8bbdd2608fd54fcc8b15c510f89dbc05b166c48339d1b1edea0b30f3c8'
-            'cf5b269e8d58804fca9aeccb58a1683499df04ba1ddc2b86cfef1bbe4424227e'
-            'a22256b9f5f916cbf103eeb4fae8110ebc89c22125437a223a8aea6f7fed16fc'
+            '7c38b8f3c3a8d5e3efbc33c37a324b3873d10a437be2a10ad2d31658f39dc61c'
+            '25fc95967fb3578d75b944ebe1c82b766f41043256751e727557133ab63eb8ea'
             'a4fc968a30c8bfae2a342ca65629ed1dc766057544db4e2e2e24d00f41a8df57'
-            'fb1fb33971be8d78ec542c502f0f6c93f1b67228692cb160c394ef239d94cf64')
+            'fb1fb33971be8d78ec542c502f0f6c93f1b67228692cb160c394ef239d94cf64'
+            '008a14b02e26796c96d3b3a2952d683aa757ad7b38673a22555d472004d5b795')
+
+prepare() {
+  # 3.32.2 (f682dc83c2, FreeRDP#13612) lets each generic dynamic channel hold
+  # only one connection. Windows can open a new WebAuthN_Channel before the
+  # previous one closes, so in-session security keys failed; exempt rdpewa only.
+  patch --directory="$srcdir/FreeRDP-$_commit" --strip=1 --fuzz=0 --forward \
+    < "$srcdir/0001-rdpewa-allow-overlapping-channels.patch"
+}
 
 build() {
   # Recipe chooses cmake via explicit PATH discovery, never inherited CMAKE.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "session.h"
+
 #include <QStringList>
 #include <QUrl>
 #include <QList>
@@ -13,6 +15,7 @@ struct Controls {
     bool rememberSignIn = false;
     int forgets = 0;
     QStringList starts;
+    QList<LaunchOptions> options;
     int stops = 0;
     QStringList pins;
     QList<QUrl> callbacks;
