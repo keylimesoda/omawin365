@@ -28,7 +28,7 @@ public:
     void clear();
 signals:
     void loaded(const QByteArray& data, bool ok);
-    void saved(bool ok);
+    void saved(bool ok, bool hasPersistentCookies);
     void cleared(bool ok);
 private:
     enum class Kind { Load, Save, Clear };

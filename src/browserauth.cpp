@@ -361,11 +361,24 @@ struct BrowserAuth::Private {
             if (!rememberSignIn) return;
             restoreCookies = SignInCookies::decode(data, QDateTime::currentSecsSinceEpoch());
             const quint64 loadedRound = round;
-            if (!ok) emit owner->signInCacheNotice(QStringLiteral("The system keyring could not be opened. Sign in normally; no unprotected cache will be used."));
+            diagnostic(!ok ? QStringLiteral("sign-in-cache-load-failed") : restoreCookies.isEmpty()
+                ? QStringLiteral("sign-in-cache-load-empty") : QStringLiteral("sign-in-cache-load-ready"));
+            emit owner->signInCacheNotice(!ok
+                ? QStringLiteral("The system keyring could not be opened. Sign in normally; no unprotected cache will be used.")
+                : restoreCookies.isEmpty()
+                    ? QStringLiteral("No unexpired Microsoft sign-in cookies were found in the system keyring. Sign in and choose ‘Stay signed in’ if offered.")
+                    : QStringLiteral("Microsoft sign-in cookies loaded from the system keyring. Restoring them in the private browser…"));
             if (active && round == loadedRound && process.state() == QProcess::NotRunning) startBrowser(true);
         });
-        QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok) {
-            if (!ok) emit owner->signInCacheNotice(QStringLiteral("Microsoft sign-in could not be saved in the system keyring. You may need to sign in again."));
+        QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok, bool hasPersistentCookies) {
+            if (!rememberSignIn) return;
+            diagnostic(!ok ? QStringLiteral("sign-in-cache-save-failed") : hasPersistentCookies
+                ? QStringLiteral("sign-in-cache-save-ready") : QStringLiteral("sign-in-cache-save-empty"));
+            emit owner->signInCacheNotice(!ok
+                ? QStringLiteral("Microsoft sign-in could not be saved in the system keyring. You may need to sign in again.")
+                : hasPersistentCookies
+                    ? QStringLiteral("Microsoft sign-in cookies saved in the system keyring. Microsoft may still require authentication.")
+                    : QStringLiteral("Microsoft supplied no eligible persistent sign-in cookies. There is no reusable sign-in saved. Choose ‘Stay signed in’ if offered; your organization's policy may prevent persistence."));
         });
         QObject::connect(&cache, &SignInCache::cleared, owner, [this](bool ok) {
             emit owner->signInForgotten(ok);
@@ -391,7 +404,7 @@ struct BrowserAuth::Private {
                     if (it->method == QStringLiteral("Storage.getCookies") || it->method == QStringLiteral("Storage.setCookies")) {
                         auto ready = std::move(it->ready);
                         pending.erase(it);
-                        ready({}); // Optional caching never prevents authentication.
+                        ready({{QStringLiteral("omawin365CookieCommandFailed"), true}}); // Optional caching never prevents authentication.
                         return;
                     }
                     transportFailure(QStringLiteral("The sign-in browser stopped responding."));
@@ -885,7 +898,7 @@ struct BrowserAuth::Private {
                 return;
             if (message.contains(QStringLiteral("error"))) {
                 if (command.method == QStringLiteral("Storage.getCookies") || command.method == QStringLiteral("Storage.setCookies")) {
-                    command.ready({});
+                    command.ready({{QStringLiteral("omawin365CookieCommandFailed"), true}});
                     return;
                 }
                 failRound(QStringLiteral("The browser could not prepare the current request securely."));
@@ -993,7 +1006,14 @@ struct BrowserAuth::Private {
         if (rememberSignIn && !restoreCookies.isEmpty()) {
             const auto cookies = std::exchange(restoreCookies, QJsonArray{});
             send(QStringLiteral("Storage.setCookies"), {{QStringLiteral("cookies"), cookies}}, {},
-                [this](const QJsonObject&) { prepareFlow(); });
+                [this, restoreRound = round](const QJsonObject& result) {
+                    const bool failed = result.value(QStringLiteral("omawin365CookieCommandFailed")).toBool();
+                    diagnostic(failed ? QStringLiteral("sign-in-cache-restore-failed") : QStringLiteral("sign-in-cache-restore-ready"));
+                    emit owner->signInCacheNotice(failed
+                        ? QStringLiteral("The private browser could not restore saved Microsoft sign-in cookies. You may need to sign in again.")
+                        : QStringLiteral("Saved Microsoft sign-in cookies restored. Microsoft decides whether authentication is required."));
+                    if (active && round == restoreRound) prepareFlow();
+                });
             return;
         }
         if (mode == Mode::Acquisition) {

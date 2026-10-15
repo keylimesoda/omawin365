@@ -34,6 +34,13 @@ or sign you out of other applications. A deletion failure is shown so you can un
 the keyring and retry. If the keyring is missing or locked and cannot be opened, sign-in
 continues normally without a plaintext cache fallback.
 
+The text below the checkbox reports whether cookies were found, restored, saved,
+or absent after sign-in. A successful keyring write containing no eligible persistent
+cookies is reported as empty, rather than as a remembered sign-in. Saved cookies
+alone do not guarantee that Microsoft will accept a subsequent sign-in silently.
+The optional `--diagnose-auth` log also records fixed cache outcome labels, without
+cookie values, names, URLs or account identifiers.
+
 FreeRDP still obtains fresh connection tokens using its existing OAuth flow. OMAWIN365
 saves only unexpired, secure, persistent cookies for `login.microsoftonline.com`;
 session-only cookies, passwords, PINs, passkeys, OAuth tokens and entire browser profiles are

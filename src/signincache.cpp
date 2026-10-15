@@ -106,7 +106,7 @@ SignInCache::~SignInCache()
 void SignInCache::load() { enqueue({Kind::Load, {}}); }
 void SignInCache::save(const QByteArray& data)
 {
-    if (data.size() > MaxBytes) { emit saved(false); return; }
+    if (data.size() > MaxBytes) { emit saved(false, false); return; }
     // Several authorization rounds can finish in one connection. Keep the newest
     // pending snapshot, without changing ordering relative to load/clear jobs.
     if (!jobs.isEmpty() && jobs.back().kind == Kind::Save) jobs.back().data = data;
@@ -159,7 +159,10 @@ void SignInCache::next()
         current.reset();
         finished->deleteLater();
         if (job.kind == Kind::Load) emit loaded(result->data, result->ok);
-        else if (job.kind == Kind::Save) emit saved(result->ok);
+        else if (job.kind == Kind::Save) {
+            const bool hasCookies = !QJsonDocument::fromJson(job.data).object().value("cookies").toArray().isEmpty();
+            emit saved(result->ok, hasCookies);
+        }
         else emit cleared(result->ok);
         next();
     });
