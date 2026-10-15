@@ -37,23 +37,10 @@ On the maintainer's Windows 365 Enterprise tenant, with a hardware security key:
 
 Not yet checked: other tenants, Frontline and other editions, multi-monitor.
 
-## Remembered sign-in checks (October 14, 2026)
+## Remembered sign-in (October 2026)
 
-- Application build and all seven test suites, including cookie domain, expiry, session-only/partitioned-cookie exclusion, cache bounds, cancellation, failed keyring operations and Forget racing a pending save.
-- BrowserAuth checks for restoring cookies before navigation, optional cookie-call failure/timeout, cancellation while loading/snapshotting and rejecting unsafe runtime storage before accessing the keyring. Window checks cover preference/deletion feedback, active-session controls and narrow layouts.
-- A separate smoke check against a real private Secret Service saved, reloaded, deleted and confirmed absence of a fictional item. Another used real Chromium CDP to restore/export a fictional Microsoft-domain persistent cookie and compare its expiry, Secure, HttpOnly and SameSite attributes. No live sign-in was attempted.
-- UI preference and Forget checked in an isolated omabox desktop (Omarchy 4.0.4-1, Hyprland 0.56.2, 1920×1080, scale 1, 0xleovision theme). The disposable keyring uses an empty password: this checks integration, not encryption at rest.
+- **Automated:** the sign-in cache suite and the BrowserAuth and Window checks described in [TESTING](TESTING.md), with an in-memory keyring stand-in.
+- **Smoke checks by the contributor, with invented cookies only:** a real private Secret Service saved, reloaded and deleted an item; real Chromium restored and exported a Microsoft-domain cookie with its expiry, Secure, HttpOnly and SameSite attributes intact.
+- **Live, by the contributor on their tenant:** sign in, disconnect, then reconnect without quitting reused the sign-in. This was before the three-way setting; that behaviour is now **Until the app closes**, which **On this device** also includes.
 
-Not yet checked for this feature: live Windows 365/FreeRDP/passkey reuse, tenant Conditional Access behavior, federated sign-in, or other Secret Service providers. The keyring provider controls encryption and unlocking. No credentials or real browser state were used in these checks.
-
-## Reconnect follow-up (October 15, 2026)
-
-The account owner reports full authentication even when reconnecting without quitting
-OmaWin365. Source inspection found that the connected handler closes the last sign-in
-window, which the existing retained-window code already documents as clearing Chromium
-session cookies. The new opt-in path retains eligible session cookies in app-lifetime
-memory and restores them on subsequent flows, while keyring encoding remains persistent
-only. Known persistent authentication cookies are distinguished from other saved cookies
-in the UI. This follow-up was compiled; the test results above predate it, and live
-reconnect behavior after this change remains unconfirmed. Reuse across app restarts
-without persistent Microsoft authentication cookies remains unresolved.
+Not yet checked: reuse after restarting the app with **On this device**, the three-way setting live, Conditional Access differences, federated sign-in, and any keyring beyond the contributor's disposable test keyring.

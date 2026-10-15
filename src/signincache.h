@@ -21,7 +21,8 @@ QJsonArray decode(const QByteArray& data, double now);
 }
 
 // Secret Service is the only storage backend. Jobs run serially off the UI thread;
-// forgetting drops queued saves and follows any in-flight save with deletion.
+// forgetting drops queued jobs, follows any in-flight save with deletion and
+// makes an in-flight load report nothing saved.
 class SignInCache final : public QObject {
     Q_OBJECT
 public:

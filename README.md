@@ -17,44 +17,6 @@ Other tenants and editions are untested. It has had extensive AI-assisted review
 
 Not affiliated with, endorsed by or supported by Microsoft or Omarchy. Microsoft, Windows, Windows 365 and the redrawn Windows 365 mark are Microsoft trademarks, used here only for identification. Provided **as-is, without warranty**, under the [MIT license](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).
 
-## Remember Microsoft sign-in
-
-Enable **Remember Microsoft sign-in on this device** to retain Microsoft's persistent
-sign-in cookies in your desktop's Secret Service keyring (for example GNOME Keyring
-or KWallet with Secret Service enabled). This is off by default. If Microsoft offers
-**Stay signed in**, accept it to allow a persistent session. Your organization's
-Conditional Access policy, cookie expiration and revocation still apply; Microsoft
-can require your passkey again. Federated identity providers may require their own
-sign-in because their cookies are not saved.
-
-While remembering is enabled, eligible Microsoft session cookies are also kept in
-application memory after successful sign-in and restored for subsequent connections.
-This keeps closing the sign-in window from discarding the current app session.
-These session cookies are never written to the keyring and disappear when OmaWin365
-exits or you choose Forget. Reuse after restarting the app still requires Microsoft
-to issue persistent authentication cookies; the local checkbox cannot enable that.
-
-**Forget Microsoft sign-in**, or turning remembering off, deletes the saved item and
-closes the private sign-in browser. These controls are available while disconnected.
-This only clears OMAWIN365's local sign-in state; it does not revoke Microsoft sessions
-or sign you out of other applications. A deletion failure is shown so you can unlock
-the keyring and retry. If the keyring is missing or locked and cannot be opened, sign-in
-continues normally without a plaintext cache fallback.
-
-The text below the checkbox reports whether sign-in was saved securely, remembered
-only until the app closes, or could not be remembered. A successful keyring write
-containing only other Microsoft cookies is not presented as saved authentication.
-Microsoft still decides whether to accept restored sign-in state.
-The optional `--diagnose-auth` log also records fixed cache outcome labels, without
-cookie values, names, URLs or account identifiers.
-
-FreeRDP still obtains fresh connection tokens using its existing OAuth flow. OMAWIN365
-saves only unexpired, secure, persistent cookies for `login.microsoftonline.com`;
-session-only cookies, passwords, PINs, passkeys, OAuth tokens and entire browser profiles are
-not saved to the keyring. The live Chromium profile, cache and temporary files remain in private tmpfs
-storage. Keyring protection and unlock behavior depend on your Secret Service provider;
-applications running as your user may be able to access an unlocked keyring.
-
 ## Build
 
 On Omarchy/Arch with Qt 6.11 (`qt6-base`, `qt6-wayland`, `qt6-svg`), a C++20 compiler, `libx11`, `libsecret` and `fontconfig`. Chromium and XWayland are needed at run time.
@@ -71,10 +33,15 @@ The app needs **FreeRDP 3.32.2 built with `WITH_SSO_MIB=OFF`**. Arch's stock `fr
 
 ## Session settings
 
-Settings apply on the next Connect or Reconnect; a running session keeps the settings it started with, including the microphone.
+Settings apply on the next Connect or Reconnect; a running session keeps the settings it started with, including the microphone. Remember sign-in can be changed only while disconnected.
 
 - **Display scale** sets the size of Windows text and icons for every Cloud PC. **Auto** follows the focused Omarchy monitor's scale.
 - **Play remote audio**, **Forward microphone** and **Share clipboard** are saved for the selected Cloud PC. Audio and microphone are off until you turn them on and use your default local devices. The clipboard carries text and images, never files. Your organization's policy can still block any of them.
+- **Remember sign-in** is for every Cloud PC and is **Off** by default, so you sign in to Microsoft each time.
+  - **Until the app closes** keeps Microsoft's sign-in cookies in memory, so Reconnect doesn't ask again.
+  - **On this device (keyring)** also saves Microsoft's long-lived sign-in cookies in your system keyring (Secret Service), so sign-in can survive a restart. Accept Microsoft's **Stay signed in?** prompt to get them. Anything that can read your unlocked keyring can use them until they expire.
+  - Either way, Microsoft and your organization's policy decide when to ask again, including for your security key. Only cookies for `login.microsoftonline.com` are kept: never passwords, PINs or tokens.
+  - **Forget sign-in** clears memory and the keyring and turns remembering off. It doesn't sign you out of Microsoft.
 
 ## Help review it
 

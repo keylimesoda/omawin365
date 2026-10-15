@@ -97,6 +97,7 @@ struct SignInCache::Result {
     GCancellable* cancel = g_cancellable_new();
     QByteArray data;
     bool ok = false;
+    bool forgotten = false; // Main thread only.
     ~Result() { g_object_unref(cancel); }
 };
 
@@ -130,6 +131,8 @@ void SignInCache::save(const QByteArray& data)
 }
 void SignInCache::clear()
 {
+    // A load already running may have read the item before it is deleted.
+    if (current) current->forgotten = true;
     jobs.clear();
     enqueue({Kind::Clear, {}});
 }
@@ -174,7 +177,7 @@ void SignInCache::next()
         thread = nullptr;
         current.reset();
         finished->deleteLater();
-        if (job.kind == Kind::Load) emit loaded(result->data, result->ok);
+        if (job.kind == Kind::Load) emit loaded(result->forgotten ? QByteArray() : result->data, result->ok);
         else if (job.kind == Kind::Save) {
             const auto cookies = QJsonDocument::fromJson(job.data).object().value("cookies").toArray();
             emit saved(result->ok, SignInCookies::hasPersistentAuthentication(cookies));

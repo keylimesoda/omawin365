@@ -48,12 +48,23 @@ struct BrowserAuthTestAccess {
 
     static void signInCache(const std::function<void(bool, const char*)>& check)
     {
-        const auto prepare = [](BrowserAuth& browser) {
+        // Any keyring call made here must fail rather than touch the developer's keyring.
+        const QByteArray bus = qgetenv("DBUS_SESSION_BUS_ADDRESS");
+        qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent-omawin365-fixture");
+        using Mode = BrowserAuth::RememberSignIn;
+        const auto prepare = [](BrowserAuth& browser, Mode mode = Mode::Device) {
             auto& state = *browser.d;
             state.writeFd = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
             state.active = true;
-            state.rememberSignIn = true;
+            state.rememberSignIn = mode;
         };
+        const double now = QDateTime::currentSecsSinceEpoch();
+        const QJsonObject persistentCookie{{"name", "ESTSAUTHPERSISTENT"}, {"value", "fictional"},
+            {"domain", ".login.microsoftonline.com"}, {"path", "/"},
+            {"secure", true}, {"httpOnly", true}, {"expires", now + 3600}};
+        const QJsonObject sessionCookie{{"name", "ESTSAUTH"}, {"value", "fictional"},
+            {"domain", ".login.microsoftonline.com"}, {"path", "/"},
+            {"secure", true}, {"httpOnly", true}, {"session", true}};
         for (const bool callbackSeen : {true, false}) {
             for (const QString error : {QStringLiteral("net::ERR_ABORTED"), QStringLiteral("net::ERR_NAME_NOT_RESOLVED")}) {
                 BrowserAuth browser;
@@ -163,18 +174,14 @@ struct BrowserAuthTestAccess {
         {
             BrowserAuth browser;
             auto& state = *browser.d;
-            browser.setRememberSignIn(true);
+            browser.setRememberSignIn(Mode::Device);
             state.loadingCache = true;
             browser.cancel();
-            const double now = QDateTime::currentSecsSinceEpoch();
-            const QJsonObject cookie{{"name", "ESTSAUTHPERSISTENT"}, {"value", "fictional"},
-                {"domain", ".login.microsoftonline.com"}, {"path", "/"},
-                {"secure", true}, {"httpOnly", true}, {"expires", now + 3600}};
-            emit state.cache.loaded(SignInCookies::encode({cookie}, now), true);
+            emit state.cache.loaded(SignInCookies::encode({persistentCookie}, now), true);
             check(!state.loadingCache && !state.active && state.process.state() == QProcess::NotRunning,
                   "keyring load completing after cancellation cannot start a browser");
             state.loadingCache = true;
-            browser.setRememberSignIn(false);
+            browser.setRememberSignIn(Mode::Off);
             check(!state.loadingCache && state.restoreCookies.isEmpty(),
                   "disabling persistence retires a load that Forget may drop from the queue");
         }
@@ -184,7 +191,7 @@ struct BrowserAuthTestAccess {
             BrowserAuth browser;
             auto& state = *browser.d;
             state.active = true;
-            state.rememberSignIn = true;
+            state.rememberSignIn = Mode::Device;
             state.startBrowser();
             check(!state.loadingCache && !state.active,
                   "unsafe runtime storage is rejected before accessing remembered credentials");
@@ -202,6 +209,57 @@ struct BrowserAuthTestAccess {
             check(completed == 1 && state.nextId == id,
                   "default private mode never exports cookies or accesses the keyring");
         }
+        {
+            BrowserAuth browser;
+            prepare(browser, Mode::AppSession);
+            auto& state = *browser.d;
+            QString notice;
+            QObject::connect(&browser, &BrowserAuth::signInCacheNotice, [&](const QString& text) { notice = text; });
+            int completed = 0;
+            const int id = state.nextId;
+            state.snapshotSignIn([&] { ++completed; });
+            state.handleMessage({{"id", id}, {"result", QJsonObject{{"cookies", QJsonArray{persistentCookie, sessionCookie}}}}});
+            check(completed == 1 && state.liveSignInCookies.size() == 2 && state.restoreCookies.size() == 2,
+                  "until-app-closes keeps session and persistent sign-in cookies in memory");
+            check(notice.contains("until you close OMAWIN365"),
+                  "until-app-closes never saves to the keyring");
+            state.active = true;
+            state.loadingCache = false;
+            state.startBrowser();
+            check(!state.loadingCache,
+                  "until-app-closes never loads from the keyring");
+        }
+        {
+            BrowserAuth browser;
+            prepare(browser, Mode::Device);
+            auto& state = *browser.d;
+            state.liveSignInCookies = {sessionCookie};
+            state.restoreCookies = {persistentCookie, sessionCookie}; // As if loaded from the keyring.
+            browser.setRememberSignIn(Mode::AppSession);
+            check(state.restoreCookies == QJsonArray{sessionCookie} && state.liveSignInCookies.size() == 1,
+                  "leaving the keyring setting keeps this app session's sign-in but not keyring-loaded cookies");
+            browser.setRememberSignIn(Mode::Off);
+            check(state.restoreCookies.isEmpty() && state.liveSignInCookies.isEmpty(),
+                  "turning remembering off drops sign-in held in memory");
+        }
+        {
+            BrowserAuth browser;
+            browser.setRememberSignIn(Mode::Device);
+            auto& state = *browser.d;
+            state.loadingCache = true;
+            int notices = 0;
+            QString notice;
+            QObject::connect(&browser, &BrowserAuth::signInCacheNotice, [&](const QString& text) { notice = text; ++notices; });
+            emit state.cache.loaded(SignInCookies::encode({persistentCookie}, now), true);
+            check(!state.loadingCache && state.restoreCookies.size() == 1 && notice.contains("Restoring"),
+                  "a keyring load supplies saved sign-in to restore");
+            browser.setRememberSignIn(Mode::AppSession);
+            emit state.cache.loaded(SignInCookies::encode({persistentCookie}, now), true);
+            check(state.restoreCookies.isEmpty() && notices == 1,
+                  "a keyring load finishing after leaving the keyring setting is ignored");
+        }
+        if (bus.isNull()) qunsetenv("DBUS_SESSION_BUS_ADDRESS");
+        else qputenv("DBUS_SESSION_BUS_ADDRESS", bus);
     }
 
     static void acquisition(const std::function<void(bool, const char*)>& check)

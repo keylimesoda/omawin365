@@ -307,7 +307,7 @@ struct BrowserAuth::Private {
     BrowserAuth* owner;
     SignInCache cache;
     QJsonArray liveSignInCookies; // App-lifetime memory only, including session cookies.
-    bool rememberSignIn = false;
+    RememberSignIn rememberSignIn = RememberSignIn::Off;
     bool loadingCache = false;
     bool finishingAuth = false;
     QJsonArray restoreCookies;
@@ -359,9 +359,8 @@ struct BrowserAuth::Private {
     {
         QObject::connect(&cache, &SignInCache::loaded, owner, [this](const QByteArray& data, bool ok) {
             loadingCache = false;
-            if (!rememberSignIn) return;
+            if (rememberSignIn != RememberSignIn::Device) return;
             restoreCookies = SignInCookies::decode(data, QDateTime::currentSecsSinceEpoch());
-            const quint64 loadedRound = round;
             diagnostic(!ok ? QStringLiteral("sign-in-cache-load-failed") : restoreCookies.isEmpty()
                 ? QStringLiteral("sign-in-cache-load-empty") : QStringLiteral("sign-in-cache-load-ready"));
             emit owner->signInCacheNotice(!ok
@@ -369,10 +368,11 @@ struct BrowserAuth::Private {
                 : restoreCookies.isEmpty()
                     ? QStringLiteral("Sign in to remember this session.")
                     : QStringLiteral("Restoring saved sign-in…"));
-            if (active && round == loadedRound && process.state() == QProcess::NotRunning) startBrowser(true);
+            // Saved sign-in isn't tied to a round, so a newer round waiting on this load uses it too.
+            if (active && process.state() == QProcess::NotRunning) startBrowser(true);
         });
         QObject::connect(&cache, &SignInCache::saved, owner, [this](bool ok, bool hasPersistentAuthentication) {
-            if (!rememberSignIn) return;
+            if (rememberSignIn != RememberSignIn::Device) return;
             diagnostic(!ok ? QStringLiteral("sign-in-cache-save-failed") : hasPersistentAuthentication
                 ? QStringLiteral("sign-in-cache-save-ready") : QStringLiteral("sign-in-cache-save-empty"));
             emit owner->signInCacheNotice(!ok
@@ -380,7 +380,7 @@ struct BrowserAuth::Private {
                 : hasPersistentAuthentication
                     ? QStringLiteral("Sign-in saved securely. Microsoft may still ask you to authenticate.")
                     : !liveSignInCookies.isEmpty()
-                        ? QStringLiteral("Sign-in remembered until you close OmaWin365. Microsoft may still ask you to authenticate.")
+                        ? QStringLiteral("Sign-in remembered until you close OMAWIN365. Microsoft may still ask you to authenticate.")
                         : QStringLiteral("Sign-in could not be remembered. You will need to sign in again."));
         });
         QObject::connect(&cache, &SignInCache::cleared, owner, [this](bool ok) {
@@ -677,14 +677,14 @@ struct BrowserAuth::Private {
             failRound(QStringLiteral("Chromium is required for Microsoft sign-in. Install the Chromium package."));
             return;
         }
-        if (rememberSignIn && !cacheReady && !liveSignInCookies.isEmpty()) {
+        if (rememberSignIn != RememberSignIn::Off && !cacheReady && !liveSignInCookies.isEmpty()) {
             // Chromium can exit after its last window closes. Preserve only the
             // current app session in memory; do not promote session cookies to disk.
             liveSignInCookies = SignInCookies::forSession(liveSignInCookies, QDateTime::currentSecsSinceEpoch());
             restoreCookies = liveSignInCookies;
             cacheReady = !restoreCookies.isEmpty();
         }
-        if (rememberSignIn && !cacheReady) {
+        if (rememberSignIn == RememberSignIn::Device && !cacheReady) {
             if (!loadingCache) {
                 loadingCache = true;
                 cache.load();
@@ -1013,7 +1013,7 @@ struct BrowserAuth::Private {
 
     void prepareFlow()
     {
-        if (rememberSignIn && !restoreCookies.isEmpty()) {
+        if (rememberSignIn != RememberSignIn::Off && !restoreCookies.isEmpty()) {
             const auto cookies = SignInCookies::forSession(std::exchange(restoreCookies, QJsonArray{}), QDateTime::currentSecsSinceEpoch());
             send(QStringLiteral("Storage.setCookies"), {{QStringLiteral("cookies"), cookies}}, {},
                 [this, restoreRound = round](const QJsonObject& result) {
@@ -1376,18 +1376,23 @@ struct BrowserAuth::Private {
 
     void snapshotSignIn(std::function<void()> complete)
     {
-        if (!rememberSignIn) { complete(); return; }
+        if (rememberSignIn == RememberSignIn::Off) { complete(); return; }
         const quint64 snapshotRound = round;
         send(QStringLiteral("Storage.getCookies"), {}, {}, [this, snapshotRound, complete = std::move(complete)](const QJsonObject& result) {
-            if (rememberSignIn && result.value(QStringLiteral("cookies")).isArray()) {
+            if (rememberSignIn != RememberSignIn::Off && result.value(QStringLiteral("cookies")).isArray()) {
                 const auto cookies = result.value(QStringLiteral("cookies")).toArray();
                 const auto now = QDateTime::currentSecsSinceEpoch();
                 liveSignInCookies = SignInCookies::forSession(cookies, now);
                 // Closing the last Chromium window clears session cookies even
                 // when the process stays alive. Restore before the next flow.
                 restoreCookies = liveSignInCookies;
-                cache.save(SignInCookies::encode(cookies, now));
-            } else
+                if (rememberSignIn == RememberSignIn::Device)
+                    cache.save(SignInCookies::encode(cookies, now));
+                else
+                    emit owner->signInCacheNotice(liveSignInCookies.isEmpty()
+                        ? QStringLiteral("Sign-in could not be remembered. You will need to sign in again.")
+                        : QStringLiteral("Sign-in remembered until you close OMAWIN365. Microsoft may still ask you to authenticate."));
+            } else if (rememberSignIn != RememberSignIn::Off)
                 emit owner->signInCacheNotice(QStringLiteral("Microsoft sign-in could not be remembered. You may need to sign in again."));
             if (active && round == snapshotRound) complete();
         });
@@ -1577,20 +1582,29 @@ void BrowserAuth::cancel()
         emit status(QStringLiteral("The browser request was cancelled."));
 }
 
-void BrowserAuth::setRememberSignIn(bool enabled)
+void BrowserAuth::setRememberSignIn(RememberSignIn mode)
 {
-    d->rememberSignIn = enabled;
-    if (!enabled) {
-        d->restoreCookies = {};
-        d->liveSignInCookies = {};
+    d->rememberSignIn = mode;
+    if (mode != RememberSignIn::Device) {
         // Forget can drop a queued load before it produces a loaded signal.
         d->loadingCache = false;
+        // Keep only what this app session captured, never cookies loaded from the keyring.
+        d->restoreCookies = d->liveSignInCookies;
     }
+    if (mode == RememberSignIn::Off) {
+        d->restoreCookies = {};
+        d->liveSignInCookies = {};
+    }
+}
+
+void BrowserAuth::forgetSavedSignIn()
+{
+    d->cache.clear(); // Serialized after any in-flight save.
 }
 
 void BrowserAuth::forgetSignIn()
 {
-    setRememberSignIn(false);
+    setRememberSignIn(RememberSignIn::Off);
     ++d->round;
     d->shutdownBrowser(); // Also erase the live browser's cookies.
     d->cache.clear(); // Serialized after any in-flight save.

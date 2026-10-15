@@ -18,14 +18,18 @@ QByteArray fixtureSecret;
 QStringList fixtureCalls;
 std::atomic<bool> holdSave = false;
 std::atomic<bool> saveEntered = false;
+std::atomic<bool> holdLoad = false;
+std::atomic<bool> loadEntered = false;
 std::atomic<bool> unavailable = false;
 void errorIfUnavailable(GError** error)
 {
     if (unavailable) g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Synthetic unavailable service");
 }
 }
-extern "C" gchar* fixture_lookup(const SecretSchema*, GCancellable*, GError** error, ...)
+extern "C" gchar* fixture_lookup(const SecretSchema*, GCancellable* cancel, GError** error, ...)
 {
+    loadEntered = true;
+    while (holdLoad && !g_cancellable_is_cancelled(cancel)) QThread::msleep(1);
     QMutexLocker lock(&fixtureMutex);
     fixtureCalls.append("load");
     errorIfUnavailable(error);
@@ -67,7 +71,7 @@ class SignInCacheTest : public QObject {
 private slots:
     void init()
     {
-        fixtureSecret.clear(); fixtureCalls.clear(); holdSave = false; saveEntered = false; unavailable = false;
+        fixtureSecret.clear(); fixtureCalls.clear(); holdSave = false; saveEntered = false; holdLoad = false; loadEntered = false; unavailable = false;
     }
     void persistentCookieRoundTrip()
     {
@@ -141,6 +145,22 @@ private slots:
         QVERIFY(fixtureSecret.isEmpty());
         QCOMPARE(fixtureCalls, QStringList({"save", "clear"}));
         QCOMPARE(loaded.count(), 0);
+    }
+    void forgetDuringLoadReportsNothingSaved()
+    {
+        fixtureSecret = "read-before-forget";
+        SignInCache cache;
+        QSignalSpy loaded(&cache, &SignInCache::loaded);
+        QSignalSpy cleared(&cache, &SignInCache::cleared);
+        holdLoad = true;
+        cache.load();
+        QTRY_VERIFY(loadEntered.load());
+        cache.clear();
+        holdLoad = false;
+        QTRY_COMPARE(cleared.count(), 1);
+        QCOMPARE(loaded.count(), 1);
+        QVERIFY(loaded.first().at(0).toByteArray().isEmpty()); // Never hands back forgotten sign-in.
+        QCOMPARE(fixtureCalls, QStringList({"load", "clear"}));
     }
     void unavailableServiceHasNoFallback()
     {

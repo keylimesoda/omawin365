@@ -23,21 +23,4 @@ Optional parser/profile fuzz harness sources are under `tools/security/`; see th
 
 See [recorded verification](VERIFICATION.md) and [contributor rules](../CONTRIBUTING.md).
 
-The sign-in cache suite substitutes an in-memory Secret Service adapter: it never
-accesses your real keyring. It covers domain/expiry/session-cookie filtering,
-bounded serialization, queued writes versus Forget, service failure and cancellation.
-BrowserAuth tests cover restoration before navigation and retiring optional cookie
-requests on cancellation; Window tests cover opt-in, deletion feedback and control
-availability. These synthetic checks do not establish that a tenant will permit
-persistent Microsoft sign-in. Live passkey/Microsoft testing requires the account
-owner and must not put real cookies or tokens into fixtures or evidence.
-
-The retained-browser handoff fixture uses a small nonblocking pipe and drains queued
-frames while collecting commands. This matches the production write behavior and
-keeps the test independent of the host's per-user pipe capacity quota.
-
-Run only the cookie-cache boundary checks with
-`.build-tests/browser/browserauth_test --cache-only` after building that target.
-They include Chromium's late `net::ERR_ABORTED` navigation acknowledgement after
-intercepting a validated OAuth callback while cookie capture is pending. Unvalidated
-aborts and other navigation errors must still stop sign-in.
+The sign-in cache suite uses an in-memory stand-in for the keyring, and the BrowserAuth cache checks point D-Bus at a missing address, so tests never touch your real keyring. They cover which cookies are kept, the three Remember sign-in choices, Forget racing a save or load, keyring failures and cancellation. Run just the BrowserAuth cache checks with `.build-tests/browser/browserauth_test --cache-only`. None of this shows that a tenant allows persistent sign-in; that needs a live test, and real cookies or tokens must never go into fixtures or logs.
