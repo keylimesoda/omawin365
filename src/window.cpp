@@ -192,7 +192,7 @@ Window::Window(Session* session, BrowserAuth* browser, ProfileStore* profiles, Q
     m_rememberSignIn = new QComboBox(content);
     m_rememberSignIn->setObjectName(QStringLiteral("rememberSignIn"));
     m_rememberSignIn->setAccessibleName(QStringLiteral("Remember Microsoft sign-in"));
-    m_rememberSignIn->setToolTip(QStringLiteral("Off: sign in every time. Until the app closes: kept in memory only. On this device: also saved in your system keyring."));
+    m_rememberSignIn->setToolTip(QStringLiteral("Off: nothing is kept after the app closes. Until the app closes: kept in memory. On this device: also saved in your system keyring."));
     m_rememberSignIn->addItem(QStringLiteral("Off"), int(BrowserAuth::RememberSignIn::Off));
     m_rememberSignIn->addItem(QStringLiteral("Until the app closes"), int(BrowserAuth::RememberSignIn::AppSession));
     m_rememberSignIn->addItem(QStringLiteral("On this device (keyring)"), int(BrowserAuth::RememberSignIn::Device));
